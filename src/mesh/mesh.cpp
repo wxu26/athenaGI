@@ -40,6 +40,7 @@
 #include "../gravity/fft_gravity.hpp"
 #include "../gravity/gravity.hpp"
 #include "../gravity/mg_gravity.hpp"
+#include "../gravity/sph_gravity.hpp"
 #include "../hydro/hydro.hpp"
 #include "../hydro/hydro_diffusion/hydro_diffusion.hpp"
 #include "../multigrid/multigrid.hpp"
@@ -526,6 +527,8 @@ Mesh::Mesh(ParameterInput *pin, int mesh_test) :
   } else if (SELF_GRAVITY_ENABLED == 2) {
     // MGDriver must be initialzied before MeshBlocks
     pmgrd = new MGGravityDriver(this, pin);
+  } else if (SELF_GRAVITY_ENABLED == 3) {
+    psgrd = new SphGravityDriver(this, pin);
   }
 
   if (IM_RADIATION_ENABLED) {
@@ -850,6 +853,8 @@ Mesh::Mesh(ParameterInput *pin, IOWrapper& resfile, int mesh_test) :
   } else if (SELF_GRAVITY_ENABLED == 2) {
     // MGDriver must be initialzied before MeshBlocks
     pmgrd = new MGGravityDriver(this, pin);
+  } else if (SELF_GRAVITY_ENABLED == 3) {
+    psgrd = new SphGravityDriver(this, pin);
   }
 
   if (IM_RADIATION_ENABLED) {
@@ -933,6 +938,7 @@ Mesh::~Mesh() {
   delete [] loclist;
   if (SELF_GRAVITY_ENABLED == 1) delete pfgrd;
   else if (SELF_GRAVITY_ENABLED == 2) delete pmgrd;
+  else if (SELF_GRAVITY_ENABLED == 3) delete psgrd;
   if (IM_RADIATION_ENABLED) delete pimrad;
   if (turb_flag > 0) delete ptrbd;
   if (adaptive) { // deallocate arrays for AMR
@@ -1489,6 +1495,8 @@ void Mesh::Initialize(int res_flag, ParameterInput *pin) {
       pfgrd->Solve(1, 0);
     else if (SELF_GRAVITY_ENABLED == 2)
       pmgrd->Solve(1);
+    else if (SELF_GRAVITY_ENABLED == 3)
+      psgrd->Solve(0);
 
 #pragma omp parallel num_threads(nthreads)
     {
