@@ -23,8 +23,6 @@ Real high_res_height_rad;
 Real high_res_cell_fraction;
 
 Real MeshGen(Real x, RegionSize rs) {
-  //Real high_res_height_rad = 0.3;//pin->GetOrAddReal("problem","high_res_height_rad",0.1);
-  //Real high_res_cell_fraction = 0.5;//pin->GetOrAddReal("problem","high_res_cell_fraction",0.5);
   Real x0 = high_res_cell_fraction;
   Real C = high_res_height_rad/(.5*PI)/x0;
   Real x1 = .5+.5*x0;
