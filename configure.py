@@ -774,6 +774,8 @@ if args['fft']:
     if args['mpi']:
         makefile_options['MPIFFT_FILE'] = ' $(wildcard src/fft/plimpton/*.cpp)'
     makefile_options['LIBRARY_FLAGS'] += ' -lfftw3'
+elif args['mpi']: # with mpi but without fft: include plimpton's pack and remap (used by RemapColumns)
+    makefile_options['MPIFFT_FILE'] = 'src/fft/plimpton/remap_3d.cpp src/fft/plimpton/pack_3d.cpp'
 
 # -hdf5 argument
 if args['hdf5']:
