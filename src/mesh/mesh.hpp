@@ -58,6 +58,7 @@ class EquationOfState;
 class FFTDriver;
 class FFTGravityDriver;
 class TurbulenceDriver;
+class RemapColumns;
 class OrbitalAdvection;
 
 FluidFormulation GetFluidFormulation(const std::string& input_string);
@@ -215,6 +216,7 @@ class Mesh {
   friend class FFTDriver;
   friend class FFTGravityDriver;
   friend class TurbulenceDriver;
+  friend class RemapColumns;
   friend class MultigridDriver;
   friend class MGGravityDriver;
   friend class Gravity;
