@@ -1,0 +1,64 @@
+<comment>
+problem   = test SphGravity poisson solver
+reference = 
+configure = --prob=test_sph_gravity --coord=spherical_polar --grav=sph -mpi -fft --include=path_to_eigen
+
+<job>
+problem_id = grav    # problem ID: basename of output filenames
+
+<output1>
+file_type  = vtk        # Binary data dump
+variable   = prim       # variables to be output
+dt         = 0.01       # time increment between outputs
+ghost_zones= true
+
+<time>
+cfl_number = 0.3        # The Courant, Friedrichs, & Lewy (CFL) Number
+nlim       = 0          # cycle limit
+tlim       = 0.01       # time limit
+integrator  = vl2       # time integration algorithm
+xorder      = 2         # order of spatial reconstruction
+ncycle_out  = 1         # interval for stdout summary info
+
+<mesh>
+nx1        = 64         # Number of zones in X1-direction
+x1min      = 0.5        # minimum value of X1
+x1max      = 1.5        # maximum value of X1
+x1rat = 1.0173139963058921
+ix1_bc     = outflow   # inner-X1 boundary flag
+ox1_bc     = outflow   # outer-X1 boundary flag
+
+nx2        = 64         # Number of zones in X2-direction
+x2min      = 0.0        # minimum value of X2
+x2max      = 3.1415926535897932        # maximum value of X2
+x2rat = -1 # use refinement
+ix2_bc     = polar   # inner-X2 boundary flag
+ox2_bc     = polar   # outer-X2 boundary flag
+
+nx3        = 128         # Number of zones in X3-direction
+x3min      = 0.       # minimum value of X3
+x3max      = 6.283185307179586        # maximum value of X3
+ix3_bc     = periodic   # inner-X3 boundary flag
+ox3_bc     = periodic   # outer-X3 boundary flag
+
+<meshblock>
+nx1        = 32
+nx2        = 32
+nx3        = 64
+
+<hydro>
+gamma           = 1.666666666667 # gamma = C_p/C_v
+iso_sound_speed = 0.4082482905   # equivalent to sqrt(gamma*p/d) for p=0.1, d=1
+
+<gravity>
+
+
+<problem>
+four_pi_G       = 1.
+
+x0 = 0.6
+y0 = 0.8
+z0 = 0.1
+R0 = 0.2
+
+high_res_height_rad = 0.2
