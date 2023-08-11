@@ -59,6 +59,7 @@ class FFTDriver;
 class FFTGravityDriver;
 class TurbulenceDriver;
 class RemapColumns;
+class SphGravityDriver;
 class OrbitalAdvection;
 
 FluidFormulation GetFluidFormulation(const std::string& input_string);
@@ -217,6 +218,7 @@ class Mesh {
   friend class FFTGravityDriver;
   friend class TurbulenceDriver;
   friend class RemapColumns;
+  friend class SphGravityDriver;
   friend class MultigridDriver;
   friend class MGGravityDriver;
   friend class Gravity;
@@ -266,6 +268,7 @@ class Mesh {
   TurbulenceDriver *ptrbd;
   FFTGravityDriver *pfgrd;
   MGGravityDriver *pmgrd;
+  SphGravityDriver *psgrd;
 
   // implicit radiation iteration
   IMRadiation *pimrad;

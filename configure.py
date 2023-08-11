@@ -177,7 +177,7 @@ parser.add_argument('-omp',
 # --grav=[name] argument
 parser.add_argument('--grav',
                     default='none',
-                    choices=['none', 'fft', 'mg'],
+                    choices=['none', 'fft', 'mg', 'sph'],
                     help='select self-gravity solver')
 
 # -fft argument
@@ -758,7 +758,14 @@ else:
                 '### CONFIGURE ERROR: FFT Poisson solver only be used with FFT')
     if args['grav'] == "mg":
         definitions['SELF_GRAVITY_ENABLED'] = '2'
-
+    if args['grav'] == "sph":
+        definitions['SELF_GRAVITY_ENABLED'] = '3'
+        if not args['fft']:
+            raise SystemExit(
+                '### CONFIGURE ERROR: spherical harmonics Poisson solver requires FFT')
+        if not args['mpi']:
+            raise SystemExit(
+                '### CONFIGURE ERROR: spherical harmonics Poisson solver requires MPI')
 
 # -fft argument
 makefile_options['MPIFFT_FILE'] = ' '
@@ -866,7 +873,8 @@ if args['grav'] == 'fft':
     self_grav_string = 'FFT'
 elif args['grav'] == 'mg':
     self_grav_string = 'Multigrid'
-
+elif args['grav'] == 'sph':
+    self_grav_string = 'spherical harmonics'
 
 def output_config(opt_descr, opt_choice, filehandle=None):
     first_col_width = 32
