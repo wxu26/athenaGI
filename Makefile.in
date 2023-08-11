@@ -62,6 +62,7 @@ SRC_FILES := $(wildcard src/*.cpp) \
 	     src/pgen/$(PROBLEM_FILE) \
 	     $(wildcard src/reconstruct/*.cpp) \
 	     $(wildcard src/scalars/*.cpp) \
+	     $(wildcard src/standalone_physics/*.cpp) \
 	     $(wildcard src/task_list/*.cpp) \
 	     $(wildcard src/utils/*.cpp) \
 	     $(MPIFFT_FILE)
