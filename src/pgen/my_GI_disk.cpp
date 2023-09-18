@@ -21,32 +21,82 @@
 #include <mpi.h>
 #endif
 
-const Real Mtot = 1.; // keep this fixed
-const Real G = 1.; // keep this fixed; do not read four_pi_G from input
 
-Real Rd = 1.; // outer edge of disk; inned edge always at r->0
-Real Rd_in = 0.4;
-Real Md = 0.1; //0.1; // disk mass
-Real Sigma_slope = -1;
-Real Sigma_d = Md/(2.*PI*Rd*Rd)*(2+Sigma_slope); // Sigma at Rd
-Real Qiso_d = 2/std::sqrt(1.6667); // 2/std::sqrt(1.6667); // Q at Rd, evaluated using isothermal sound speed
-Real T_slope = -0.5;
-Real T_d = SQR(PI*G*Sigma_d*Qiso_d/std::sqrt(G*Mtot/Rd/Rd/Rd));
 
-bool read_from_2d;
 
-Real tau_cool = -1; // linear cooling; <0 for no cooling
-Real hypercool_density_threshold = 1.e-8; // <0 to turn off hypercooling at low density
 
-bool inject_perturbation=false;
-Real perturbation_level=1.e-4;
-int perturbation_m_min=1;
-int perturbation_m_max=6;
-int random_seed = 2023;
+
+
+
+
+//========================================================================================
+// Parameters - fixed
+//========================================================================================
+const Real Mtot = 1.; // total mass (disk+star)
+const Real G = 1.; // do not read four_pi_G from input
+
+Real Sigma_slope = -1.99; // disk surface density slope
+  // this should be -2, but keeping it !=-2 avoid divergences in calculations
+Real T_slope = -1; // temperature slope
+// these are fixed to give approximately uniform Q and h/r thoughout the disk
+
+//========================================================================================
+// Parameters - read from input
+//========================================================================================
+
+// grid
+
+Real nth_lo; // # of low/mid res cells (for half pi)
+Real nth_hi; // # of high res cells (for half pi)
+Real h_hi; // height of high res region (in rad)
+Real dth_pole; // cell size at pole
+
+// initial conditions
+
+bool read_from_2d = false; // read 2d initial conditions from athdf file
+std::string input_filename; // athdf file containing IC
+
+Real Rd; // outer edge of disk
+Real Rd_in; // inner edge of disk
+Real Md; // total disk mass - this indirectly controls h/r
+Real Qd; // initial Q at Rd (defined using adiabatic sound speed and Keplerian kappa)
+
+// cooling
+
+int cooling_mode = 0;
+  // 0: cooling off
+  // 1: linear cooling: t_cool = beta_cool / OmegaK
+
+Real beta_cool;
+Real hypercool_density_threshold = 1.e-8;
+  // threshold for hypercooling - we multiplty cooling rate by
+  // (1+hypercool_density_threshold/density)
+  // <0 to turn off hypercooling at low density
+
+// relaxation (used for making ic)
 
 bool relaxation = false;
 
-Real dfloor; // density floor (to be read from input)
+// initial perturbation:
+// a range of different m with the same amplitude and random phases
+
+bool inject_perturbation=false;
+Real perturbation_relative_amplitude;
+int perturbation_m_min;
+int perturbation_m_max;
+int random_seed = 2023; // fix this across simulations to use the same physical ic
+
+
+
+
+
+
+
+
+
+//========================================================================================
+// Forward declarations
+//========================================================================================
 
 void MySource(MeshBlock *pmb, const Real time, const Real dt,
               const AthenaArray<Real> &prim, const AthenaArray<Real> &prim_scalar,
@@ -60,74 +110,86 @@ void DiskOuterX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceF
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh);
 
-void GetStellarMassAndLocation(MeshBlock * pmb, Real Mtot, Real & M_star, Real & x_star, Real & y_star, Real & z_star);
+void GetStellarMassAndLocation(MeshBlock * pmb, Real Mtot, Real & M_star, Real & x_star,
+                               Real & y_star, Real & z_star);
 
-// th grid function
-Real high_res_height_rad;
-Real high_res_cell_fraction;
-Real MeshGen(Real x, RegionSize rs) {
-  Real x0 = high_res_cell_fraction;
-  Real C = high_res_height_rad/(.5*PI)/x0;
-  Real x1 = .5+.5*x0;
-  Real gamma = std::log((1.-C*x0)/(1.-x0)/C)/(x1-x0);
-  const int n_iter = 8;
-  for (int i=0; i<n_iter; ++i) {
-    Real f = 1./gamma * (std::exp(gamma*(x1-x0))-1.) + std::exp(gamma*(x1-x0))*(1.-x1) - (1.-C*x0)/C;
-    Real df = -1./SQR(gamma) * (std::exp(gamma*(x1-x0))-1.) + 1./gamma * (x1-x0)*std::exp(gamma*(x1-x0)) + (x1-x0)*std::exp(gamma*(x1-x0))*(1.-x1);
-    gamma -= f/df;
-  }
-  bool reflect = (std::abs(rs.x2max-.5*PI)<1.e-8);
-  Real y;
-  // remap to x=0 at midplane and 1 at pole
-  Real sign = 1.;
-  if (!reflect) {
-    if (x>.5) sign = -1.;
-    x = std::abs(x-.5) * 2.;
-  } else {
-    x = 1.-x;
-  }
-  // get y
-  if (x<x0) y = C*x;
-  else if (x<x1) y = C*x0 + C/gamma*(std::exp(gamma*(x-x0))-1.);
-  else y = 1.-C*std::exp(gamma*(x1-x0))*(1.-x);
-  // map back to coord
-  if (!reflect) {
-    y = .5-.5*y*sign;
-  } else {
-    y = 1.-y;
-  }
-  return y*rs.x2max + (1.-y)*rs.x2min;
-}
+Real MeshGen(Real x, RegionSize rs);
 
-// init mesh
+
+
+
+
+
+
+
+
+//========================================================================================
+// Initialize user data
+//========================================================================================
 
 void Mesh::InitUserMeshData(ParameterInput *pin) {
-  //Real four_pi_G = pin->GetReal("problem","four_pi_G");
-  SetFourPiG(4.*PI*G);
 
-  EnrollUserExplicitSourceFunction(MySource);
+  // read parameters
 
+  // grid
+  if (pin->GetOrAddReal("mesh","x2rat",1.0)<0.) {
+    nth_lo   = pin->GetReal("mesh","nth_lo");
+    nth_hi   = pin->GetReal("mesh","nth_hi");
+    h_hi     = pin->GetReal("mesh","h_hi");
+    dth_pole = pin->GetReal("mesh","dth_pole");
+  }
+  // initial conditions
   read_from_2d = pin->GetOrAddBoolean("problem","read_from_2d",read_from_2d);
-
-  tau_cool = pin->GetOrAddReal("problem","tau_cool",tau_cool);
-
-  inject_perturbation = pin->GetOrAddBoolean("problem","inject_perturbation",inject_perturbation);
-  perturbation_level = pin->GetOrAddReal("problem","perturbation_level",perturbation_level);
-
+  if (read_from_2d) {
+    input_filename = pin->GetString("problem", "input_filename");
+  } else {
+    Rd    = pin->GetReal("problem","Rd");
+    Rd_in = pin->GetReal("problem","Rd_in");
+    Md    = pin->GetReal("problem","Md");
+    Qd    = pin->GetReal("problem","Qd");
+  }
+  // cooling
+  cooling_mode = pin->GetOrAddInteger("problem","cooling_mode",cooling_mode);
+  if (cooling_mode==1) {
+    beta_cool = pin->GetReal("problem","beta_cool");
+    hypercool_density_threshold = pin->GetOrAddReal("problem","hypercool_density_threshold",hypercool_density_threshold);
+  }
+  // relaxation (used for making ic)
   relaxation = pin->GetOrAddBoolean("problem","relaxation",relaxation);
+  // initial perturbation
+  inject_perturbation = pin->GetOrAddBoolean("problem","inject_perturbation",inject_perturbation);
+  if (inject_perturbation) {
+    perturbation_relative_amplitude = pin->GetReal("problem","perturbation_relative_amplitude");
+    perturbation_m_min = pin->GetInteger("problem","perturbation_m_min");
+    perturbation_m_max = pin->GetInteger("problem","perturbation_m_max");
+    random_seed = pin->GetOrAddInteger("problem","random_seed",random_seed);
+  }
 
+  // set physics
+  
+  // gravity
+  SetFourPiG(4.*PI*G);
+  // confirm that we haven't declared G in input
+  if (pin->DoesParameterExist("problem","four_pi_G")) {
+    std::stringstream msg;
+    msg << "### FATAL ERROR in Mesh::InitUserMeshData" << std::endl
+        << "this problem generator uses a fixed G; do not set four_pi_G in input!";
+    ATHENA_ERROR(msg);
+  }
+  // source (cooling and relaxation)
+  EnrollUserExplicitSourceFunction(MySource);
+  // boundary conitions
   if (mesh_bcs[BoundaryFace::inner_x1] == GetBoundaryFlag("user")) {
     EnrollUserBoundaryFunction(BoundaryFace::inner_x1, DiskInnerX1);
   }
   if (mesh_bcs[BoundaryFace::outer_x1] == GetBoundaryFlag("user")) {
     EnrollUserBoundaryFunction(BoundaryFace::outer_x1, DiskOuterX1);
   }
+  // mesh generator
+  if (pin->GetOrAddReal("mesh","x2rat",1.0)<0.)
+    EnrollUserMeshGenerator(X2DIR,MeshGen);
 
-  if (pin->GetOrAddReal("mesh","x2rat",1.0)>0.) return;
-  // below: customized mesh generator function for theta
-  high_res_height_rad = pin->GetOrAddReal("problem","high_res_height_rad",0.5);
-  high_res_cell_fraction = pin->GetOrAddReal("problem","high_res_cell_fraction",0.5);
-  EnrollUserMeshGenerator(X2DIR,MeshGen);
+  // data field
 
   AllocateRealUserMeshDataField(1);
   ruser_mesh_data[0].NewAthenaArray(4); // stellar properties
@@ -143,40 +205,20 @@ void MeshBlock::InitUserMeshBlockData(ParameterInput *pin) {
   pmy_mesh->psgrd->UpdateStar(M_star, x_star, y_star, z_star);
 }
 
-// initialize a disk
+
+
+
+
+
+
+
+
+//========================================================================================
+// Problem generator
+//========================================================================================
 
 void MeshBlock::ProblemGenerator(ParameterInput *pin) {
-  for (int k=ks; k<=ke; ++k) {
-    for (int j=js; j<=je; ++j) {
-      for (int i=is; i<=ie; ++i) {
-        Real R, z;
-
-        Real r = pcoord->x1v(i);
-        Real th = pcoord->x2v(j);
-        R = r*std::sin(th);
-        z = r*std::cos(th);
-
-        Real Sigma = (R<=Rd && R>Rd_in) ? Sigma_d * std::pow(R/Rd, Sigma_slope) : 0.;
-        Real T = T_d * std::pow(R/Rd, T_slope);
-        Real MR = Mtot; 
-        if (R<Rd) MR = Mtot - 2.*PI * Sigma_d * (1.-std::pow(R/Rd, 2+Sigma_slope)) / (2+Sigma_slope); // M(<R)
-        Real H = std::sqrt(T) / std::sqrt(G*MR/(R*R*R)); // computed using isothermal sound speed cs_iso = sqrt(T)
-        Real rho_mid = Sigma/H/std::sqrt(2.*PI);
-        phydro->u(IDN,k,j,i) = rho_mid * std::exp(-.5*SQR(z/H));
-        phydro->u(IM1,k,j,i) = 0.;
-        phydro->u(IM2,k,j,i) = 0.;
-        phydro->u(IM3,k,j,i) = phydro->u(IDN,k,j,i) * std::sqrt(1./R);
-        const Real gamma = peos->GetGamma();
-        if (NON_BAROTROPIC_EOS) {
-          phydro->u(IEN,k,j,i) = phydro->u(IDN,k,j,i)*T/(gamma-1.)
-           + .5*(SQR(phydro->u(IM1,k,j,i)) + SQR(phydro->u(IM2,k,j,i)) + SQR(phydro->u(IM3,k,j,i)))/phydro->u(IDN,k,j,i);
-        }
-      }
-    }
-  }
-
-  if (read_from_2d) {
-    std::string input_filename = pin->GetString("problem", "input_filename");
+  if (read_from_2d) { // case 1. read from athdf
     std::string dataset_cons = "cons";
     // make a global array
     AthenaArray<Real> u_global;
@@ -217,11 +259,6 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin) {
       HDF5ReadRealArray(input_filename.c_str(), dataset_cons.c_str(), 5, start_cons_file,
                         count_cons_file, 4, start_cons_mem,
                         count_cons_mem, u_global, true);
-      void HDF5ReadRealArray(const char *filename, const char *dataset_name, int rank_file,
-                       const int *start_file, const int *count_file, int rank_mem,
-                       const int *start_mem, const int *count_mem,
-                       AthenaArray<Real> &array,
-                       bool collective=false, bool noop=false);
     }
     // dump data into grid
     for (int k=ks; k<=ke; ++k) {
@@ -240,21 +277,67 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin) {
     u_global.DeleteAthenaArray();
   }
 
+  else { // case 2. make new initial condition
+    const Real gamma = peos->GetGamma();
+    Real Sigma_d = Md/(2.*PI*Rd*Rd)/(1-std::pow(Rd_in/Rd, 2+Sigma_slope))*(2+Sigma_slope); // Sigma at Rd
+    Real T_d = SQR(PI*G*Sigma_d*Qd/std::sqrt(G*Mtot/Rd/Rd/Rd))/gamma; // T at Rd
+    for (int k=ks; k<=ke; ++k) {
+      for (int j=js; j<=je; ++j) {
+        for (int i=is; i<=ie; ++i) {
+          Real R, z;
 
+          Real r = pcoord->x1v(i);
+          Real th = pcoord->x2v(j);
+          R = r*std::sin(th);
+          z = r*std::cos(th);
+
+          Real Sigma = (R<=Rd && R>Rd_in) ? Sigma_d * std::pow(R/Rd, Sigma_slope) : 0.;
+          Real T = T_d * std::pow(R/Rd, T_slope);
+          Real MR = Mtot; 
+          if (R<Rd) MR = Mtot - 2.*PI * Sigma_d * (1.-std::pow(R/Rd, 2+Sigma_slope)) / (2+Sigma_slope); // M(<R)
+          Real H = std::sqrt(T) / std::sqrt(G*MR/(R*R*R)); // computed using isothermal sound speed cs_iso = sqrt(T)
+          Real rho_mid = Sigma/H/std::sqrt(2.*PI);
+          phydro->u(IDN,k,j,i) = rho_mid * std::exp(-.5*SQR(z/H));
+          phydro->u(IM1,k,j,i) = 0.;
+          phydro->u(IM2,k,j,i) = 0.;
+          phydro->u(IM3,k,j,i) = phydro->u(IDN,k,j,i) * std::sqrt(1./R);
+          if (NON_BAROTROPIC_EOS) {
+            phydro->u(IEN,k,j,i) = phydro->u(IDN,k,j,i)*T/(gamma-1.)
+             + .5*(SQR(phydro->u(IM1,k,j,i)) + SQR(phydro->u(IM2,k,j,i)) + SQR(phydro->u(IM3,k,j,i)))/phydro->u(IDN,k,j,i);
+          }
+        }
+      }
+    }
+  }
+
+  // update stellar properties
   Real M_star, x_star, y_star, z_star;
   GetStellarMassAndLocation(this, Mtot, M_star, x_star, y_star, z_star);
   pmy_mesh->psgrd->UpdateStar(M_star, x_star, y_star, z_star);
-  std::cout<<M_star<<" "<<Globals::my_rank;
+  std::cout<<"after pegn: Mstar="<<M_star<<std::endl;
 }
 
-// cooling: beta cooling
+
+
+
+
+
+
+
+
+//========================================================================================
+// Source term: cooling and relaxation
+//========================================================================================
 
 void MySource(MeshBlock *pmb, const Real time, const Real dt,
               const AthenaArray<Real> &prim, const AthenaArray<Real> &prim_scalar,
               const AthenaArray<Real> &bcc, AthenaArray<Real> &cons,
               AthenaArray<Real> &cons_scalar) {
+  const Real gamma = pmb->peos->GetGamma();
   const Real gm1 = pmb->peos->GetGamma()-1.;
-  if (relaxation) {
+  if (relaxation) { // case 1. relaxation
+    Real Sigma_d = Md/(2.*PI*Rd*Rd)/(1-std::pow(Rd_in/Rd, 2+Sigma_slope))*(2+Sigma_slope); // Sigma at Rd
+    Real T_d = SQR(PI*G*Sigma_d*Qd/std::sqrt(G*Mtot/Rd/Rd/Rd))/gamma; // T at Rd
     for (int k = pmb->ks; k <= pmb->ke; ++k) {
       for (int j = pmb->js; j <= pmb->je; ++j) {
         for (int i = pmb->is; i <= pmb->ie; ++i) {
@@ -264,32 +347,44 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt,
           Real p_goal = prim(IDN,k,j,i) * T_d * std::pow(R/Rd, T_slope);
           Real v = std::sqrt(SQR(prim(IVX,k,j,i))+SQR(prim(IVY,k,j,i)));
           Real vK = std::sqrt(G*Mtot/R);
+          Real cooling_rate = 10. * std::sqrt(G*Mtot/R/R/R);
+          cooling_rate *= (1.+hypercool_density_threshold/prim(IDN,k,j,i));
           Real damping_rate = 10. * std::sqrt(G*Mtot/R/R/R) * std::max(1., v/(0.01*vK));
-          cons(IEN,k,j,i) -= (prim(IPR,k,j,i)-p_goal) / gm1 * (1-std::exp(-dt*damping_rate));
+          cons(IEN,k,j,i) -= (prim(IPR,k,j,i)-p_goal) / gm1 * (1-std::exp(-dt*cooling_rate));
           cons(IM1,k,j,i) -= prim(IDN,k,j,i) * prim(IVX,k,j,i) * (1.-std::exp(-dt*damping_rate));
           cons(IM2,k,j,i) -= prim(IDN,k,j,i) * prim(IVY,k,j,i) * (1.-std::exp(-dt*damping_rate));
         }
       }
     }
-    return;
   }
-  for (int k = pmb->ks; k <= pmb->ke; ++k) {
-    for (int j = pmb->js; j <= pmb->je; ++j) {
-      for (int i = pmb->is; i <= pmb->ie; ++i) {
-        Real r = pmb->pcoord->x1v(i);
-        Real th = pmb->pcoord->x2v(j);
-        Real R = r*std::sin(th);
-        Real temp = prim(IPR,k,j,i) / prim(IDN,k,j,i);
-        Real cooling_rate = 0.;
-        if (tau_cool>0.) cooling_rate += 1/tau_cool; // beta cooling
-        cooling_rate += hypercool_density_threshold/prim(IDN,k,j,i);
-        cooling_rate *= std::sqrt(G*Mtot/R/R/R);
-        cons(IEN,k,j,i) -= prim(IPR,k,j,i) / gm1 * (1-std::exp(-dt*cooling_rate));
+  else if (cooling_mode==1) { // case 2. beta cooling
+    for (int k = pmb->ks; k <= pmb->ke; ++k) {
+      for (int j = pmb->js; j <= pmb->je; ++j) {
+        for (int i = pmb->is; i <= pmb->ie; ++i) {
+          Real r = pmb->pcoord->x1v(i);
+          Real th = pmb->pcoord->x2v(j);
+          Real R = r*std::sin(th);
+          Real temp = prim(IPR,k,j,i) / prim(IDN,k,j,i);
+          Real cooling_rate = std::sqrt(G*Mtot/R/R/R)/beta_cool; // beta cooling
+          cooling_rate *= (1.+hypercool_density_threshold/prim(IDN,k,j,i));
+          cons(IEN,k,j,i) -= prim(IPR,k,j,i) / gm1 * (1-std::exp(-dt*cooling_rate));
+        }
       }
     }
   }
-  return;
 }
+
+
+
+
+
+
+
+
+
+//========================================================================================
+// User work in loop: update stellar mass, inject perturbation
+//========================================================================================
 
 void MeshBlock::UserWorkInLoop() {
   // update stellar mass
@@ -308,9 +403,10 @@ void MeshBlock::UserWorkInLoop() {
     Real * amplitudes = new Real [m_max-m_min+1];
     Real * phases = new Real [m_max-m_min+1];
     for (int m=m_min; m<m_max; ++m) {
-      amplitudes[m-m_min] = perturbation_level;
+      amplitudes[m-m_min] = perturbation_relative_amplitude;
       phases[m-m_min] = ((Real) std::rand()/RAND_MAX) * 2.*PI;
     }
+    Real dfloor = peos->GetDensityFloor();
     for (int k=ks; k<=ke; ++k) {
       Real phi = pcoord->x3v(k);
       Real factor = 1.;
@@ -341,6 +437,19 @@ void MeshBlock::UserWorkInLoop() {
   }
 }
 
+
+
+
+
+
+
+
+
+//========================================================================================
+// Boundary conditions
+//========================================================================================
+
+// outer: reflect poloidal velocity, maintain rotation
 void DiskOuterX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
@@ -357,6 +466,9 @@ void DiskOuterX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
     }
   }
 }
+
+// this inner bc is usually not used
+// inner: reflect poloidal velocity, maintain rotation
 void DiskInnerX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
@@ -373,6 +485,18 @@ void DiskInnerX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
     }
   }
 }
+
+
+
+
+
+
+
+
+
+//========================================================================================
+// Get stellar properties
+//========================================================================================
 
 void GetStellarMassAndLocation(MeshBlock * pmb, Real Mtot, Real & M_star, Real & x_star, Real & y_star, Real & z_star) {
   Real M [4] = {0.,0.,0.,0.};
@@ -402,19 +526,70 @@ void GetStellarMassAndLocation(MeshBlock * pmb, Real Mtot, Real & M_star, Real &
   y_star = -M[2]/M_star;
   z_star = -M[3]/M_star;
 
-  // correction for 2d
+  // correction for 2d and 1d
   if (pmb->block_size.nx3==1) {
     x_star = 0.;
     y_star = 0.;
+    if (pmb->block_size.nx2==1) z_star = 0.;
+    // physically we don't expect this 1d case to be ever relevant...
+    // but keep this here just in case
   }
 
-  /*if (Globals::my_rank==0) {
-    std::cout<<"disk-to-total mass ratio = "<<M[0]/Mtot<<std::endl;
-    std::cout<<"x, y, z of star = "<<x_star<<" "<<y_star<<" "<<z_star<<std::endl;
-  }*/
   // save results in ruser_mesh_data
   pmb->pmy_mesh->ruser_mesh_data[0](0) = M_star;
   pmb->pmy_mesh->ruser_mesh_data[0](1) = x_star;
   pmb->pmy_mesh->ruser_mesh_data[0](2) = y_star;
   pmb->pmy_mesh->ruser_mesh_data[0](3) = z_star;
+}
+
+
+
+
+
+
+
+
+
+//========================================================================================
+// Mesh generator
+//========================================================================================
+Real MeshGen(Real x, RegionSize rs) {
+  // variables set externally: nth_lo, nth_hi, h_hi, dth_pole
+
+  // sanity check: is the resolution correct?
+  bool reflect = (std::abs(rs.x2max-.5*PI)<1.e-8);
+  if ((2-reflect) * (nth_lo + nth_hi) != rs.nx2) {
+    std::stringstream msg;
+    msg << "### FATAL ERROR in MeshGen" << std::endl
+        << "input nth_lo and nth_hi do not agree with grid";
+    ATHENA_ERROR(msg);
+  }
+
+  Real dth_mid = h_hi/nth_hi;
+  Real A = PI*.5-h_hi;
+  Real gamma = (dth_pole*std::log(dth_pole/dth_mid)+dth_mid-dth_pole) / (nth_lo*dth_pole-A);
+  
+  // remap to x=0 at midplane and 1 at pole
+  Real sign = 1.;
+  if (!reflect) {
+    if (x>.5) sign = -1.;
+    x = std::abs(x-.5) * 2.;
+  } else {
+    x = 1.-x;
+  }
+  // remap to x = nth_lo+nth_hi at pole
+  x *= nth_lo+nth_hi;
+  // y: 0 at midplane and pi/2 at pole
+  Real y;
+  if (x<=nth_hi) y = x*dth_mid;
+  else if (x<=nth_hi+std::log(dth_pole/dth_mid)/gamma) y = nth_hi*dth_mid + 1./gamma*(std::exp((x-nth_hi)*gamma)-1.)*dth_mid;
+  else y = PI*.5 - dth_pole*(nth_hi+nth_lo-x);
+  // remap y
+  y /= (PI*.5);
+  if (!reflect) {
+    y = .5-.5*y*sign;
+  } else {
+    y = 1.-y;
+  }
+  return y*rs.x2max + (1.-y)*rs.x2min;
 }
