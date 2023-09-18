@@ -88,7 +88,7 @@ SphGravityDriver::~SphGravityDriver() {
 void SphGravityDriver::Solve(int stage) {
   if (SPH_GRAV_DEBUG) std::cout<<"start solve"<<std::endl;
   // check if we want to skip this solve
-  if (one_solve_per_cycle_ && grav_.Initialized() && stage!=0) return;
+  if (one_solve_per_cycle_ && grav_.Initialized() && stage!=1) return;
   // initialize if necessary
   if (!grav_.Initialized()) {
     grav_.Initialize(pmy_mesh_->my_blocks(0), four_pi_G_);
@@ -231,7 +231,7 @@ void SphGravity::LoadSource(Real * src) {
     for (int j=pmb->js;j<=pmb->je;j++) {
       for (int i=pmb->is;i<=pmb->ie;i++) {
         int ind = (k-pmb->ks)*pmb->block_size.nx2*pmb->block_size.nx1 
-                + (j-pmb->js)*pmb->block_size.nx2 + (i-pmb->is);
+                + (j-pmb->js)*pmb->block_size.nx1 + (i-pmb->is);
         src[ind] = pmb->phydro->u(IDN,k,j,i) * four_pi_G * SQR(pmb->pcoord->x1v(i)) / N[2];
       }
     }
