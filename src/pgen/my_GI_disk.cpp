@@ -110,12 +110,11 @@ void DiskOuterX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceF
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh);
 
-void GetStellarMassAndLocation(MeshBlock * pmb, Real Mtot, Real & M_star, Real & x_star,
-                               Real & y_star, Real & z_star);
+void GetStellarMassAndLocation(SphGravity * grav, MeshBlock * pmb);
 
 Real MeshGen(Real x, RegionSize rs);
 
-
+Real MyHst(MeshBlock *pmb, int iout);
 
 
 
@@ -142,12 +141,11 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   read_from_2d = pin->GetOrAddBoolean("problem","read_from_2d",read_from_2d);
   if (read_from_2d) {
     input_filename = pin->GetString("problem", "input_filename");
-  } else {
-    Rd    = pin->GetReal("problem","Rd");
-    Rd_in = pin->GetReal("problem","Rd_in");
-    Md    = pin->GetReal("problem","Md");
-    Qd    = pin->GetReal("problem","Qd");
   }
+  Rd    = pin->GetReal("problem","Rd");
+  Rd_in = pin->GetReal("problem","Rd_in");
+  Md    = pin->GetReal("problem","Md");
+  Qd    = pin->GetReal("problem","Qd");
   // cooling
   cooling_mode = pin->GetOrAddInteger("problem","cooling_mode",cooling_mode);
   if (cooling_mode==1) {
@@ -193,16 +191,23 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
 
   AllocateRealUserMeshDataField(1);
   ruser_mesh_data[0].NewAthenaArray(4); // stellar properties
+
+  // hst outputs
+
+  AllocateUserHistoryOutput(6); // Mstar, xstar, ystar, zstar, rho_max, rho_rel_max
+  EnrollUserHistoryOutput(0, MyHst, "Mstar", UserHistoryOperation::max);
+  EnrollUserHistoryOutput(1, MyHst, "xstar", UserHistoryOperation::max);
+  EnrollUserHistoryOutput(2, MyHst, "ystar", UserHistoryOperation::max);
+  EnrollUserHistoryOutput(3, MyHst, "zstar", UserHistoryOperation::max);
+  EnrollUserHistoryOutput(4, MyHst, "rho_max", UserHistoryOperation::max);
+  EnrollUserHistoryOutput(5, MyHst, "rho_rel_max", UserHistoryOperation::max);
+    // rho_rel is relative to (extrapolated) initial midplane density
 }
 
 void MeshBlock::InitUserMeshBlockData(ParameterInput *pin) {
-  // update stellar properties - this is only relevant for restarts
-  Real M_star, x_star, y_star, z_star;
-  M_star = pmy_mesh->ruser_mesh_data[0](0);
-  x_star = pmy_mesh->ruser_mesh_data[0](1);
-  y_star = pmy_mesh->ruser_mesh_data[0](2);
-  z_star = pmy_mesh->ruser_mesh_data[0](3);
-  pmy_mesh->psgrd->UpdateStar(M_star, x_star, y_star, z_star);
+  // enroll function for updating the star
+  // do this here because gravity driver is initialized after InitUserMeshData()
+  pmy_mesh->psgrd->EnrollUpdateStarFn(GetStellarMassAndLocation);
 }
 
 
@@ -309,12 +314,6 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin) {
       }
     }
   }
-
-  // update stellar properties
-  Real M_star, x_star, y_star, z_star;
-  GetStellarMassAndLocation(this, Mtot, M_star, x_star, y_star, z_star);
-  pmy_mesh->psgrd->UpdateStar(M_star, x_star, y_star, z_star);
-  std::cout<<"after pegn: Mstar="<<M_star<<std::endl;
 }
 
 
@@ -383,15 +382,10 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt,
 
 
 //========================================================================================
-// User work in loop: update stellar mass, inject perturbation
+// User work in loop: inject perturbation at the end of the first timestep
 //========================================================================================
 
 void MeshBlock::UserWorkInLoop() {
-  // update stellar mass
-  Real M_star, x_star, y_star, z_star;
-  GetStellarMassAndLocation(this, Mtot, M_star, x_star, y_star, z_star);
-  pmy_mesh->psgrd->UpdateStar(M_star, x_star, y_star, z_star);
-
   // inject perturbation
   if (inject_perturbation) {
     inject_perturbation = false;
@@ -498,7 +492,7 @@ void DiskInnerX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
 // Get stellar properties
 //========================================================================================
 
-void GetStellarMassAndLocation(MeshBlock * pmb, Real Mtot, Real & M_star, Real & x_star, Real & y_star, Real & z_star) {
+void GetStellarMassAndLocation(SphGravity * grav, MeshBlock * pmb) {
   Real M [4] = {0.,0.,0.,0.};
   for (int k = pmb->ks; k <= pmb->ke; ++k) {
     for (int j = pmb->js; j <= pmb->je; ++j) {
@@ -521,10 +515,10 @@ void GetStellarMassAndLocation(MeshBlock * pmb, Real Mtot, Real & M_star, Real &
 #ifdef MPI_PARALLEL
   MPI_Allreduce(MPI_IN_PLACE, &M, 4, MPI_ATHENA_REAL, MPI_SUM, MPI_COMM_WORLD);
 #endif
-  M_star = Mtot - M[0];
-  x_star = -M[1]/M_star;
-  y_star = -M[2]/M_star;
-  z_star = -M[3]/M_star;
+  Real M_star = Mtot - M[0];
+  Real x_star = -M[1]/M_star;
+  Real y_star = -M[2]/M_star;
+  Real z_star = -M[3]/M_star;
 
   // correction for 2d and 1d
   if (pmb->block_size.nx3==1) {
@@ -540,6 +534,11 @@ void GetStellarMassAndLocation(MeshBlock * pmb, Real Mtot, Real & M_star, Real &
   pmb->pmy_mesh->ruser_mesh_data[0](1) = x_star;
   pmb->pmy_mesh->ruser_mesh_data[0](2) = y_star;
   pmb->pmy_mesh->ruser_mesh_data[0](3) = z_star;
+  // save results in grav
+  grav->M_star = M_star;
+  grav->x_star = x_star;
+  grav->y_star = y_star;
+  grav->z_star = z_star;
 }
 
 
@@ -592,4 +591,49 @@ Real MeshGen(Real x, RegionSize rs) {
     y = 1.-y;
   }
   return y*rs.x2max + (1.-y)*rs.x2min;
+}
+
+
+
+
+
+
+
+
+
+//========================================================================================
+// History output
+//========================================================================================
+Real MyHst(MeshBlock *pmb, int iout){
+  // stellar properties
+  if (iout<4) return pmb->pmy_mesh->ruser_mesh_data[0](iout);
+  // max density or max relative density
+  else if (iout==4 || iout==5) {
+    int is=pmb->is, ie=pmb->ie, js=pmb->js, je=pmb->je, ks=pmb->ks, ke=pmb->ke;
+    Real y_max = 0.;
+    const Real gamma = pmb->peos->GetGamma();
+    Real Sigma_d = Md/(2.*PI*Rd*Rd)/(1-std::pow(Rd_in/Rd, 2+Sigma_slope))*(2+Sigma_slope); // Sigma at Rd
+    Real T_d = SQR(PI*G*Sigma_d*Qd/std::sqrt(G*Mtot/Rd/Rd/Rd))/gamma; // T at Rd
+    for(int k=ks; k<=ke; k++) {
+      for(int j=js; j<=je; j++) {
+        for(int i=is; i<=ie; i++) {
+          Real y = pmb->phydro->u(IDN,k,j,i);
+          if (iout==5) {
+            // find rho_mid; this is similar to what we do in ProblemGenerator()
+            Real r = pmb->pcoord->x1v(i);
+            Real th = pmb->pcoord->x2v(j);
+            Real R = r*std::sin(th);
+            Real Sigma = Sigma_d * std::pow(R/Rd, Sigma_slope);
+            Real T = T_d * std::pow(R/Rd, T_slope);
+            Real H = std::sqrt(T) / std::sqrt(G*Mtot/(R*R*R));
+            Real rho_mid = Sigma/H/std::sqrt(2.*PI);
+            y /= rho_mid;
+          }
+          if (y>y_max) y_max = y;
+        }
+      }
+    }
+    return y_max;
+  }
+  else return 0.;
 }
