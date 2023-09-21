@@ -98,6 +98,7 @@ void SphGravityDriver::Solve(int stage) {
   // apply bcs
   grav_.SetBoundaries();
   // add point mass (include in ghost cells)
+  if (use_update_star_fn_) update_star_fn_(&grav_, pmy_mesh_->my_blocks(0));
   grav_.AddPointMass();
   if (SPH_GRAV_DEBUG) std::cout<<"finish solve"<<std::endl;
 }
