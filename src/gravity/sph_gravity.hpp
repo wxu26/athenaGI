@@ -19,6 +19,9 @@
 class MeshBlock;
 class ParameterInput;
 class GravityBoundaryTaskList;
+class SphGravity;
+
+using UpdateStarFn = void (*)(SphGravity * grav, MeshBlock * pmb);
 
 //----------------------------------------------------------------------------------------
 //! \class SphGravity
@@ -92,6 +95,10 @@ class SphGravityDriver {
       grav_.x_star = x_star; grav_.y_star = y_star; grav_.z_star = z_star;
       grav_.r_smooth = r_smooth;
     }
+    void EnrollUpdateStarFn(UpdateStarFn my_update_star_fn) {
+      update_star_fn_ = my_update_star_fn;
+      use_update_star_fn_ = true;
+    }
 
   private:
     Real four_pi_G_;
@@ -100,6 +107,9 @@ class SphGravityDriver {
     Mesh *pmy_mesh_;
     SphGravity grav_;
     bool one_solve_per_cycle_ = false; // if true, only run solver at stage=0
+    bool use_update_star_fn_ = false; // if ture, use a user-defined function to update 
+                                      // stellar properties before each solve
+    UpdateStarFn update_star_fn_;
 };
 
 #endif // GRAVITY_SPH_GRAVITY_HPP_
