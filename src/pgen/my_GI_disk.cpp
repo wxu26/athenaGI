@@ -471,9 +471,12 @@ void DiskInnerX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
       for (int i=1; i<=ngh; ++i) {
         Real r1=pmb->pcoord->x1v(il-i), r2=pmb->pcoord->x1v(il+i-1);
         prim(IDN,k,j,il-i) = prim(IDN,k,j,il+i-1);
-        prim(IVX,k,j,il-i) = -prim(IVX,k,j,il+i-1)*SQR(r2)/SQR(r1);
-        prim(IVY,k,j,il-i) = -prim(IVY,k,j,il+i-1);
+        prim(IVX,k,j,il-i) = std::min(0.,prim(IVX,k,j,il+i-1)*SQR(r2)/SQR(r1));
+          // outflow with velocity cap
+        prim(IVY,k,j,il-i) = prim(IVY,k,j,il+i-1);
         prim(IVZ,k,j,il-i) = prim(IVZ,k,j,il+i-1)*r2/r1;
+          // constant rotation; this avoids extracting angular momentum from inner boundary,
+          // which might excite disk eccentricity
         prim(IPR,k,j,il-i) = prim(IPR,k,j,il+i-1);
       }
     }
