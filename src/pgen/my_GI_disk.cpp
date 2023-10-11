@@ -61,6 +61,10 @@ Real Rd_in; // inner edge of disk
 Real Md; // total disk mass - this indirectly controls h/r
 Real Qd; // initial Q at Rd (defined using adiabatic sound speed and Keplerian kappa)
 
+// star
+
+bool fix_star_at_origin = false; // fix the star at origin
+
 // cooling
 
 int cooling_mode = 0;
@@ -146,6 +150,8 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   Rd_in = pin->GetReal("problem","Rd_in");
   Md    = pin->GetReal("problem","Md");
   Qd    = pin->GetReal("problem","Qd");
+  // star
+  fix_star_at_origin = pin->GetOrAddBoolean("problem","fix_star_at_origin",fix_star_at_origin);
   // cooling
   cooling_mode = pin->GetOrAddInteger("problem","cooling_mode",cooling_mode);
   if (cooling_mode==1) {
@@ -519,9 +525,9 @@ void GetStellarMassAndLocation(SphGravity * grav, MeshBlock * pmb) {
   MPI_Allreduce(MPI_IN_PLACE, &M, 4, MPI_ATHENA_REAL, MPI_SUM, MPI_COMM_WORLD);
 #endif
   Real M_star = Mtot - M[0];
-  Real x_star = -M[1]/M_star;
-  Real y_star = -M[2]/M_star;
-  Real z_star = -M[3]/M_star;
+  Real x_star = fix_star_at_origin ? 0. : -M[1]/M_star;
+  Real y_star = fix_star_at_origin ? 0. : -M[2]/M_star;
+  Real z_star = fix_star_at_origin ? 0. : -M[3]/M_star;
 
   // correction for 2d and 1d
   if (pmb->block_size.nx3==1) {
