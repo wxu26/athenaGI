@@ -50,6 +50,7 @@ Real nth_lo; // # of low/mid res cells (for half pi)
 Real nth_hi; // # of high res cells (for half pi)
 Real h_hi; // height of high res region (in rad)
 Real dth_pole; // cell size at pole
+int n_polar_cells_to_exclude; // number of polar cells to exclude if using user th bc
 
 // initial conditions
 
@@ -113,6 +114,12 @@ void DiskInnerX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceF
 void DiskOuterX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh);
+void PoleInnerX2(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
+                 Real time, Real dt,
+                 int il, int iu, int jl, int ju, int kl, int ku, int ngh);
+void PoleOuterX2(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
+                 Real time, Real dt,
+                 int il, int iu, int jl, int ju, int kl, int ku, int ngh);
 
 void GetStellarMassAndLocation(SphGravity * grav, MeshBlock * pmb);
 
@@ -140,6 +147,16 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
     nth_hi   = pin->GetReal("mesh","nth_hi");
     h_hi     = pin->GetReal("mesh","h_hi");
     dth_pole = pin->GetReal("mesh","dth_pole");
+  }
+  if (mesh_bcs[BoundaryFace::inner_x2] == GetBoundaryFlag("user") ||
+      mesh_bcs[BoundaryFace::outer_x2] == GetBoundaryFlag("user")) {
+    n_polar_cells_to_exclude = pin->GetInteger("mesh","n_polar_cells_to_exclude");
+    if (n_polar_cells_to_exclude<2 || n_polar_cells_to_exclude>=block_size.nx2) {
+      std::stringstream msg;
+      msg << "### FATAL ERROR in InitUserMeshData" << std::endl
+          << "invalid n_polar_cells_to_exclude";
+      ATHENA_ERROR(msg);
+    }
   }
   // initial conditions
   read_from_2d = pin->GetOrAddBoolean("problem","read_from_2d",read_from_2d);
@@ -188,6 +205,12 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   }
   if (mesh_bcs[BoundaryFace::outer_x1] == GetBoundaryFlag("user")) {
     EnrollUserBoundaryFunction(BoundaryFace::outer_x1, DiskOuterX1);
+  }
+  if (mesh_bcs[BoundaryFace::inner_x2] == GetBoundaryFlag("user")) {
+    EnrollUserBoundaryFunction(BoundaryFace::inner_x2, PoleInnerX2);
+  }
+  if (mesh_bcs[BoundaryFace::outer_x2] == GetBoundaryFlag("user")) {
+    EnrollUserBoundaryFunction(BoundaryFace::outer_x2, PoleOuterX2);
   }
   // mesh generator
   if (pin->GetOrAddReal("mesh","x2rat",1.0)<0.)
@@ -467,8 +490,7 @@ void DiskOuterX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
   }
 }
 
-// this inner bc is usually not used
-// inner: reflect poloidal velocity, maintain rotation
+// inner: modified outflow
 void DiskInnerX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
@@ -484,6 +506,72 @@ void DiskInnerX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
           // constant rotation; this avoids extracting angular momentum from inner boundary,
           // which might excite disk eccentricity
         prim(IPR,k,j,il-i) = prim(IPR,k,j,il+i-1);
+      }
+    }
+  }
+}
+
+// theta boundary: apply bc a few cells away from the pole
+void PoleOuterX2(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
+                 Real time, Real dt,
+                 int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
+  int jb = pmb->je-n_polar_cells_to_exclude; // last active cell
+  Real dfloor = pmb->peos->GetDensityFloor();
+  Real pfloor = pmb->peos->GetPressureFloor();
+  for (int k=kl; k<=ku; ++k) {
+    // physical bc: maintain rotation but reflect other directions
+    for (int j=jb+1; j<=jb+ngh; ++j) {
+      Real R_ratio = std::sin(pco->x2v(jb))/std::sin(pco->x2v(j));
+        // boundary R / this R
+      for (int i=il; i<=iu; ++i) {
+        prim(IDN,k,j,i) = prim(IDN,k,jb,i);
+        prim(IPR,k,j,i) = prim(IPR,k,jb,i);
+        prim(IVX,k,j,i) = -prim(IVX,k,jb,i);
+        prim(IVY,k,j,i) = -prim(IVY,k,jb,i);
+        prim(IVZ,k,j,i) = prim(IVZ,k,jb,i)*R_ratio;
+      }
+    }
+    // set everything to 0
+    for (int j=jb+ngh+1; j<=pmb->je+ngh; ++j) {
+      for (int i=il; i<=iu; ++i) {
+        prim(IDN,k,j,i) = dfloor;
+        prim(IPR,k,j,i) = pfloor;
+        prim(IVX,k,j,i) = 0.;
+        prim(IVY,k,j,i) = 0.;
+        prim(IVZ,k,j,i) = 0.;
+      }
+    }
+  }
+}
+
+// theta boundary: apply bc a few cells away from the pole
+void PoleInnerX2(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
+                 Real time, Real dt,
+                 int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
+  int jb = pmb->js+n_polar_cells_to_exclude; // last active cell
+  Real dfloor = pmb->peos->GetDensityFloor();
+  Real pfloor = pmb->peos->GetPressureFloor();
+  for (int k=kl; k<=ku; ++k) {
+    // physical bc: maintain rotation but reflect other directions
+    for (int j=jb-1; j>=jb-ngh; --j) {
+      Real R_ratio = std::sin(pco->x2v(jb))/std::sin(pco->x2v(j));
+        // boundary R / this R
+      for (int i=il; i<=iu; ++i) {
+        prim(IDN,k,j,i) = prim(IDN,k,jb,i);
+        prim(IPR,k,j,i) = prim(IPR,k,jb,i);
+        prim(IVX,k,j,i) = -prim(IVX,k,jb,i);
+        prim(IVY,k,j,i) = -prim(IVY,k,jb,i);
+        prim(IVZ,k,j,i) = prim(IVZ,k,jb,i)*R_ratio;
+      }
+    }
+    // set everything to 0
+    for (int j=jb-ngh-1; j>=pmb->js-ngh; --j) {
+      for (int i=il; i<=iu; ++i) {
+        prim(IDN,k,j,i) = dfloor;
+        prim(IPR,k,j,i) = pfloor;
+        prim(IVX,k,j,i) = 0.;
+        prim(IVY,k,j,i) = 0.;
+        prim(IVZ,k,j,i) = 0.;
       }
     }
   }
