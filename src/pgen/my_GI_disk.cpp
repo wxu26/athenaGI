@@ -17,6 +17,8 @@
 
 #include "../standalone_physics/optical_depth_rth.hpp"
 
+#include "../nr_radiation/radiation.hpp"
+
 #ifdef MPI_PARALLEL
 #include <mpi.h>
 #endif
@@ -50,11 +52,12 @@ Real nth_lo; // # of low/mid res cells (for half pi)
 Real nth_hi; // # of high res cells (for half pi)
 Real h_hi; // height of high res region (in rad)
 Real dth_pole; // cell size at pole
-int n_polar_cells_to_exclude; // number of polar cells to exclude if using user th bc
+int n_polar_cells_to_exclude=0; // number of polar cells to exclude if using user th bc
 
 // initial conditions
 
-bool read_from_2d = false; // read 2d initial conditions from athdf file
+bool read_from_2d = false; // read 2d initial conditions from athdf file (assume cons & single meshblock)
+bool read_from_3d = false; // read 3d initial conditions from athdf file (assume prim & same meshblock layout as current sim)
 std::string input_filename; // athdf file containing IC
 
 Real Rd; // outer edge of disk
@@ -69,7 +72,7 @@ bool fix_star_at_origin = false; // fix the star at origin
 // cooling
 
 int cooling_mode = 0;
-  // 0: cooling off
+  // 0: cooling off (or use radiation)
   // 1: linear cooling: t_cool = beta_cool / OmegaK
 
 Real beta_cool;
@@ -77,6 +80,10 @@ Real hypercool_density_threshold = 1.e-8;
   // threshold for hypercooling - we multiplty cooling rate by
   // (1+hypercool_density_threshold/density)
   // <0 to turn off hypercooling at low density
+
+// radiation
+
+Real kappa = 0.;
 
 // relaxation (used for making ic)
 
@@ -108,6 +115,8 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt,
               const AthenaArray<Real> &bcc, AthenaArray<Real> &cons,
               AthenaArray<Real> &cons_scalar);
 
+void DiskOpacity(MeshBlock *pmb, AthenaArray<Real> &prim);
+
 void DiskInnerX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh);
@@ -120,6 +129,22 @@ void PoleInnerX2(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceF
 void PoleOuterX2(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh);
+void RadInnerX1(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
+                const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
+                Real time, Real dt,
+                int is, int ie, int js, int je, int ks, int ke, int ngh);
+void RadOuterX1(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
+                const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
+                Real time, Real dt,
+                int is, int ie, int js, int je, int ks, int ke, int ngh);
+void RadInnerX2(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
+                const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
+                Real time, Real dt,
+                int is, int ie, int js, int je, int ks, int ke, int ngh);
+void RadOuterX2(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
+                const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
+                Real time, Real dt,
+                int is, int ie, int js, int je, int ks, int ke, int ngh);
 
 void GetStellarMassAndLocation(SphGravity * grav, MeshBlock * pmb);
 
@@ -160,9 +185,9 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   }
   // initial conditions
   read_from_2d = pin->GetOrAddBoolean("problem","read_from_2d",read_from_2d);
-  if (read_from_2d) {
+  read_from_3d = pin->GetOrAddBoolean("problem","read_from_3d",read_from_3d);
+  if (read_from_2d || read_from_3d)
     input_filename = pin->GetString("problem", "input_filename");
-  }
   Rd    = pin->GetReal("problem","Rd");
   Rd_in = pin->GetReal("problem","Rd_in");
   Md    = pin->GetReal("problem","Md");
@@ -175,6 +200,8 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
     beta_cool = pin->GetReal("problem","beta_cool");
     hypercool_density_threshold = pin->GetOrAddReal("problem","hypercool_density_threshold",hypercool_density_threshold);
   }
+  // radiation
+  kappa = pin->GetOrAddReal("problem","kappa",kappa);
   // relaxation (used for making ic)
   relaxation = pin->GetOrAddBoolean("problem","relaxation",relaxation);
   // initial perturbation
@@ -202,15 +229,19 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   // boundary conitions
   if (mesh_bcs[BoundaryFace::inner_x1] == GetBoundaryFlag("user")) {
     EnrollUserBoundaryFunction(BoundaryFace::inner_x1, DiskInnerX1);
+    if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) EnrollUserRadBoundaryFunction(BoundaryFace::inner_x1, RadInnerX1);
   }
   if (mesh_bcs[BoundaryFace::outer_x1] == GetBoundaryFlag("user")) {
     EnrollUserBoundaryFunction(BoundaryFace::outer_x1, DiskOuterX1);
+    if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) EnrollUserRadBoundaryFunction(BoundaryFace::outer_x1, RadOuterX1);
   }
   if (mesh_bcs[BoundaryFace::inner_x2] == GetBoundaryFlag("user")) {
     EnrollUserBoundaryFunction(BoundaryFace::inner_x2, PoleInnerX2);
+    if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) EnrollUserRadBoundaryFunction(BoundaryFace::inner_x2, RadInnerX2);
   }
   if (mesh_bcs[BoundaryFace::outer_x2] == GetBoundaryFlag("user")) {
     EnrollUserBoundaryFunction(BoundaryFace::outer_x2, PoleOuterX2);
+    if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) EnrollUserRadBoundaryFunction(BoundaryFace::outer_x2, RadOuterX2);
   }
   // mesh generator
   if (pin->GetOrAddReal("mesh","x2rat",1.0)<0.)
@@ -237,6 +268,8 @@ void MeshBlock::InitUserMeshBlockData(ParameterInput *pin) {
   // enroll function for updating the star
   // do this here because gravity driver is initialized after InitUserMeshData()
   pmy_mesh->psgrd->EnrollUpdateStarFn(GetStellarMassAndLocation);
+
+  if(NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) pnrrad->EnrollOpacityFunction(DiskOpacity);
 }
 
 
@@ -252,7 +285,7 @@ void MeshBlock::InitUserMeshBlockData(ParameterInput *pin) {
 //========================================================================================
 
 void MeshBlock::ProblemGenerator(ParameterInput *pin) {
-  if (read_from_2d) { // case 1. read from athdf
+  if (read_from_2d) { // case 1. read from 2d prim athdf file with same resolution and single meshblock
     std::string dataset_cons = "cons";
     // make a global array
     AthenaArray<Real> u_global;
@@ -309,9 +342,94 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin) {
     }
     // delete scratch array
     u_global.DeleteAthenaArray();
+    // radiation
+    if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) pnrrad->ir.ZeroClear();
+  }
+    
+  else if (read_from_3d) { // case 2. read from 3d prim athdf file with same resolution and meskblock layout
+    std::string dataset_prim = "prim";
+    int start_cons_file[5];
+    start_cons_file[1] = gid; // assume same mb layout
+    start_cons_file[2] = 0;
+    start_cons_file[3] = 0;
+    start_cons_file[4] = 0;
+    int start_cons_indices[5];
+    start_cons_indices[IDN] = 0;
+    start_cons_indices[IM1] = 2; // actually ivx
+    start_cons_indices[IM2] = 3; // actually ivy
+    start_cons_indices[IM3] = 4; // actually ivz
+    start_cons_indices[IEN] = 1; // actually ipr
+    int count_cons_file[5];
+    count_cons_file[0] = 1;
+    count_cons_file[1] = 1;
+    count_cons_file[2] = block_size.nx3;
+    count_cons_file[3] = block_size.nx2;
+    count_cons_file[4] = block_size.nx1;
+    int start_cons_mem[4];
+    start_cons_mem[1] = ks;
+    start_cons_mem[2] = js;
+    start_cons_mem[3] = is;
+    int count_cons_mem[4];
+    count_cons_mem[0] = 1;
+    count_cons_mem[1] = block_size.nx3;
+    count_cons_mem[2] = block_size.nx2;
+    count_cons_mem[3] = block_size.nx1;
+
+    // Set conserved values from file
+    for (int n = 0; n < NHYDRO; ++n) {
+      start_cons_file[0] = start_cons_indices[n];
+      start_cons_mem[0] = n;
+      HDF5ReadRealArray(input_filename.c_str(), dataset_prim.c_str(), 5, start_cons_file,
+                        count_cons_file, 4, start_cons_mem,
+                        count_cons_mem, phydro->u, true);
+    }
+
+    // update conserved value (because u currently stores w)
+    const Real gamma = peos->GetGamma();
+    for (int k=ks; k<=ke; ++k) {
+      for (int j=js; j<=je; ++j) {
+        for (int i=is; i<=ie; ++i) {
+          phydro->u(IM1,k,j,i) *= phydro->u(IDN,k,j,i);
+          phydro->u(IM2,k,j,i) *= phydro->u(IDN,k,j,i);
+          phydro->u(IM3,k,j,i) *= phydro->u(IDN,k,j,i);
+          if (NON_BAROTROPIC_EOS) {
+            phydro->u(IEN,k,j,i) = phydro->u(IEN,k,j,i)/(gamma-1.)
+             + .5*(SQR(phydro->u(IM1,k,j,i)) + SQR(phydro->u(IM2,k,j,i)) + SQR(phydro->u(IM3,k,j,i)))/phydro->u(IDN,k,j,i);
+          }
+        }
+      }
+    }
+
+    // initialize radiation: just initialize to 0 because radiation energy density and pressure are negligible and the system will quickly get close to equilibirum
+    if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) pnrrad->ir.ZeroClear();
+    
+    
+    /*if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) {
+      const Real gamma = peos->GetGamma();
+      const Real a = pnrrad->prat;
+      const Real c = pnrrad->crat;
+      for (int k=ks; k<=ke; ++k) {
+        for (int j=js; j<=je; ++j) {
+          for (int i=is; i<=ie; ++i) {
+            Real p = (gamma-1.) * (phydro->u(IEN,k,j,i) - .5*(SQR(phydro->u(IM1,k,j,i)) + SQR(phydro->u(IM2,k,j,i)) + SQR(phydro->u(IM3,k,j,i)))/phydro->u(IDN,k,j,i));
+            Real T = p/phydro->u(IDN,k,j,i);
+            T = std::min(0.01, T); // temperature cap - not good
+            Real tau = kappa * phydro->u(IDN,k,j,i) * pcoord->x1v(i) * 0.05; // estimate tau
+            //Real I = a*c*T*T*T*T/(4.*PI); // single-frequency blackbody
+            for (int ifr=0; ifr<pnrrad->nfreq; ++ifr) {
+              for (int n=0; n<pnrrad->nang; ++n) {
+                //pnrrad->ir(k,j,i,ifr*pnrrad->nang+n) = I;
+                pnrrad->ir(k,j,i,ifr*pnrrad->nang+n) = std::pow(T,4) * (1.-std::exp(-tau));
+              }
+            }
+          }
+        }
+      }
+    }*/
+    
   }
 
-  else { // case 2. make new initial condition
+  else { // case 3. make new initial condition
     const Real gamma = peos->GetGamma();
     Real Sigma_d = Md/(2.*PI*Rd*Rd)/(1-std::pow(Rd_in/Rd, 2+Sigma_slope))*(2+Sigma_slope); // Sigma at Rd
     Real T_d = SQR(PI*G*Sigma_d*Qd/std::sqrt(G*Mtot/Rd/Rd/Rd))/gamma; // T at Rd
@@ -341,6 +459,28 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin) {
           }
         }
       }
+    }
+    
+    // initialize radiation: start with zero (a good choice because choosing T_rad=T(R) leaves too much radiation at pole)
+    if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) {
+      pnrrad->ir.ZeroClear();
+      /*const Real gamma = peos->GetGamma();
+      Real T_d = SQR(PI*G*Sigma_d*Qd/std::sqrt(G*Mtot/Rd/Rd/Rd))/gamma; // T at Rd
+      for (int k=ks; k<=ke; ++k) {
+        for (int j=js; j<=je; ++j) {
+          for (int i=is; i<=ie; ++i) {
+            Real r = pcoord->x1v(i);
+            Real th = pcoord->x2v(j);
+            Real R = r*std::sin(th);
+            Real T = T_d * std::pow(R/Rd, T_slope);
+            for (int ifr=0; ifr<pnrrad->nfreq; ++ifr) {
+              for (int n=0; n<pnrrad->nang; ++n) {
+                pnrrad->ir(k,j,i,ifr*pnrrad->nang+n) = std::pow(T,4);
+              }
+            }
+          }
+        }
+      }*/
     }
   }
 }
@@ -396,6 +536,59 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt,
           Real cooling_rate = std::sqrt(G*Mtot/R/R/R)/beta_cool; // beta cooling
           cooling_rate *= (1.+hypercool_density_threshold/prim(IDN,k,j,i));
           cons(IEN,k,j,i) -= prim(IPR,k,j,i) / gm1 * (1-std::exp(-dt*cooling_rate));
+        }
+      }
+    }
+  }
+}
+
+
+
+
+
+
+
+
+
+//========================================================================================
+// Opacity function: constant opacity
+//========================================================================================
+
+void DiskOpacity(MeshBlock *pmb, AthenaArray<Real> &prim) {
+  NRRadiation *pnrrad = pmb->pnrrad;
+  int il = pmb->is; int jl = pmb->js; int kl = pmb->ks;
+  int iu = pmb->ie; int ju = pmb->je; int ku = pmb->ke;
+  il -= NGHOST;
+  iu += NGHOST;
+  if(ju > jl){
+    jl -= NGHOST;
+    ju += NGHOST;
+  }
+  if(ku > kl){
+    kl -= NGHOST;
+    ku += NGHOST;
+  }
+  Real dfloor = pmb->peos->GetDensityFloor();
+  int jal=jl, jau=ju;
+  if (n_polar_cells_to_exclude>0) {
+    if (pmb->loc.lx2==0)
+      jal = pmb->js+n_polar_cells_to_exclude;
+    if (pmb->loc.lx2==pmb->pmy_mesh->mesh_size.nx2/pmb->block_size.nx2-1)
+      jau = pmb->je-n_polar_cells_to_exclude;
+  }
+  for (int k=kl; k<=ku; ++k) {
+    for (int j=jl; j<=ju; ++j) {
+      for (int i=il; i<=iu; ++i) {
+        Real sigma;
+        if (j<jal || j>jau)
+          sigma = dfloor*kappa;
+        else
+          sigma = prim(IDN,k,j,i) * kappa;
+        for (int ifr=0; ifr<pnrrad->nfreq; ++ifr){
+          pnrrad->sigma_s(k,j,i,ifr) = 0.0;
+          pnrrad->sigma_a(k,j,i,ifr) = sigma;
+          pnrrad->sigma_pe(k,j,i,ifr) = sigma;
+          pnrrad->sigma_p(k,j,i,ifr) = sigma;
         }
       }
     }
@@ -518,6 +711,7 @@ void PoleOuterX2(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
   int jb = pmb->je-n_polar_cells_to_exclude; // last active cell
   Real dfloor = pmb->peos->GetDensityFloor();
   Real pfloor = pmb->peos->GetPressureFloor();
+  Real gamma = pmb->peos->GetGamma();
   for (int k=kl; k<=ku; ++k) {
     // physical bc: maintain rotation but reflect other directions
     for (int j=jb+1; j<=jb+ngh; ++j) {
@@ -529,6 +723,11 @@ void PoleOuterX2(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
         prim(IVX,k,j,i) = -prim(IVX,k,jb,i);
         prim(IVY,k,j,i) = -prim(IVY,k,jb,i);
         prim(IVZ,k,j,i) = prim(IVZ,k,jb,i)*R_ratio;
+        pmb->phydro->u(IDN,k,j,i) = dfloor;
+        pmb->phydro->u(IEN,k,j,i) = pfloor/(gamma-1.);
+        pmb->phydro->u(IM1,k,j,i) = 0.;
+        pmb->phydro->u(IM2,k,j,i) = 0.;
+        pmb->phydro->u(IM3,k,j,i) = 0.;
       }
     }
     // set everything to 0
@@ -539,6 +738,11 @@ void PoleOuterX2(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
         prim(IVX,k,j,i) = 0.;
         prim(IVY,k,j,i) = 0.;
         prim(IVZ,k,j,i) = 0.;
+        pmb->phydro->u(IDN,k,j,i) = dfloor;
+        pmb->phydro->u(IEN,k,j,i) = pfloor/(gamma-1.);
+        pmb->phydro->u(IM1,k,j,i) = 0.;
+        pmb->phydro->u(IM2,k,j,i) = 0.;
+        pmb->phydro->u(IM3,k,j,i) = 0.;
       }
     }
   }
@@ -551,6 +755,7 @@ void PoleInnerX2(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
   int jb = pmb->js+n_polar_cells_to_exclude; // last active cell
   Real dfloor = pmb->peos->GetDensityFloor();
   Real pfloor = pmb->peos->GetPressureFloor();
+  Real gamma = pmb->peos->GetGamma();
   for (int k=kl; k<=ku; ++k) {
     // physical bc: maintain rotation but reflect other directions
     for (int j=jb-1; j>=jb-ngh; --j) {
@@ -562,6 +767,11 @@ void PoleInnerX2(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
         prim(IVX,k,j,i) = -prim(IVX,k,jb,i);
         prim(IVY,k,j,i) = -prim(IVY,k,jb,i);
         prim(IVZ,k,j,i) = prim(IVZ,k,jb,i)*R_ratio;
+        pmb->phydro->u(IDN,k,j,i) = dfloor;
+        pmb->phydro->u(IEN,k,j,i) = pfloor/(gamma-1.);
+        pmb->phydro->u(IM1,k,j,i) = 0.;
+        pmb->phydro->u(IM2,k,j,i) = 0.;
+        pmb->phydro->u(IM3,k,j,i) = 0.;
       }
     }
     // set everything to 0
@@ -572,9 +782,124 @@ void PoleInnerX2(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
         prim(IVX,k,j,i) = 0.;
         prim(IVY,k,j,i) = 0.;
         prim(IVZ,k,j,i) = 0.;
+        pmb->phydro->u(IDN,k,j,i) = dfloor;
+        pmb->phydro->u(IEN,k,j,i) = pfloor/(gamma-1.);
+        pmb->phydro->u(IM1,k,j,i) = 0.;
+        pmb->phydro->u(IM2,k,j,i) = 0.;
+        pmb->phydro->u(IM3,k,j,i) = 0.;
       }
     }
   }
+}
+
+// r boundary: vacuum
+void RadInnerX1(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
+                const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
+                Real time, Real dt,
+                int is, int ie, int js, int je, int ks, int ke, int ngh) {
+  for (int k=ks; k<=ke; ++k) {
+    for (int j=js; j<=je; ++j) {
+      for (int i=1; i<=ngh; ++i) {
+        for(int ifr=0; ifr<pnrrad->nfreq; ++ifr) {
+          for(int n=0; n<pnrrad->nang; ++n) {
+            Real mu = pnrrad->mu(0,k,j,is-i,ifr*pnrrad->nang+n);
+            if (mu<0.) // flowing out - continuous
+              ir(k,j,is-i,ifr*pnrrad->nang+n) = ir(k,j,is-i+1,ifr*pnrrad->nang+n);
+            else // flowing in - zero
+              ir(k,j,is-i,ifr*pnrrad->nang+n) = 0.0;
+          }
+        }
+      }
+    }
+  }
+}
+void RadOuterX1(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
+                const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
+                Real time, Real dt,
+                int is, int ie, int js, int je, int ks, int ke, int ngh) {
+  for (int k=ks; k<=ke; ++k) {
+    for (int j=js; j<=je; ++j) {
+      for (int i=1; i<=ngh; ++i) {
+        for(int ifr=0; ifr<pnrrad->nfreq; ++ifr) {
+          for(int n=0; n<pnrrad->nang; ++n) {
+            Real mu = pnrrad->mu(0,k,j,ie+i,ifr*pnrrad->nang+n);
+            if (mu>0.) // flowing out - continuous
+              ir(k,j,ie+i,ifr*pnrrad->nang+n) = ir(k,j,ie+i-1,ifr*pnrrad->nang+n);
+            else // flowing in - zero
+              ir(k,j,ie+i,ifr*pnrrad->nang+n) = 0.0;
+          }
+        }
+      }
+    }
+  }
+}
+
+// copied from bvals/cc/nr_radiation/reflect_rad.cpp
+void MyCopyIntensity(Real *iri, Real *iro, int li, int lo, int n_ang) {
+  // here ir is only intensity for each cell and each frequency band
+  for (int n=0; n<n_ang; ++n) {
+    int angi = li * n_ang + n;
+    int ango = lo * n_ang + n;
+    iro[angi] = iri[ango];
+    iro[ango] = iri[angi];
+  }
+}
+
+// theta boundary: reflecting (copied from bvals/cc/nr_radiation/reflect_rad.cpp)
+// TODO: see if Yanfei has a better idea?
+void RadInnerX2(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
+                const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
+                Real time, Real dt,
+                int il, int iu, int jl, int ju, int kl, int ku, int ngh){
+  int &noct = pmb->pnrrad->noct;
+  int n_ang = pmb->pnrrad->nang/noct; // angles per octant
+  int &nfreq = pmb->pnrrad->nfreq; // number of frequency bands
+
+  for (int k=kl; k<=ku; ++k) {
+    for (int j=1; j<=ngh; ++j) {
+      for (int i=il; i<=iu; ++i) {
+        for (int ifr=0; ifr<nfreq; ++ifr) {
+          Real *iri = &ir(k,jl+j-1,i,ifr*pmb->pnrrad->nang);
+          Real *iro = &ir(k,jl-j,i, ifr*pmb->pnrrad->nang);
+          MyCopyIntensity(iri, iro, 0, 2, n_ang);
+          MyCopyIntensity(iri, iro, 1, 3, n_ang);
+
+          if (noct > 3) {
+            MyCopyIntensity(iri, iro, 4, 6, n_ang);
+            MyCopyIntensity(iri, iro, 5, 7, n_ang);
+          }
+        }
+      }
+    }
+  }
+  return;
+}
+void RadOuterX2(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
+                const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
+                Real time, Real dt,
+                int il, int iu, int jl, int ju, int kl, int ku, int ngh){
+  int &noct = pmb->pnrrad->noct;
+  int n_ang = pmb->pnrrad->nang/noct; // angles per octant
+  int &nfreq = pmb->pnrrad->nfreq; // number of frequency bands
+
+  for (int k=kl; k<=ku; ++k) {
+    for (int j=1; j<=ngh; ++j) {
+      for (int i=il; i<=iu; ++i) {
+        for (int ifr=0; ifr<nfreq; ++ifr) {
+          Real *iri = &ir(k,ju-j+1,i,ifr*pmb->pnrrad->nang);
+          Real *iro = &ir(k,ju+j,i, ifr*pmb->pnrrad->nang);
+          MyCopyIntensity(iri, iro, 0, 2, n_ang);
+          MyCopyIntensity(iri, iro, 1, 3, n_ang);
+
+          if (noct > 3) {
+            MyCopyIntensity(iri, iro, 4, 6, n_ang);
+            MyCopyIntensity(iri, iro, 5, 7, n_ang);
+          }
+        }
+      }
+    }
+  }
+  return;
 }
 
 
@@ -583,8 +908,8 @@ void PoleInnerX2(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
 
 
 
-
-
+    
+    
 //========================================================================================
 // Get stellar properties
 //========================================================================================
