@@ -52,7 +52,6 @@ Real nth_lo; // # of low/mid res cells (for half pi)
 Real nth_hi; // # of high res cells (for half pi)
 Real h_hi; // height of high res region (in rad)
 Real dth_pole; // cell size at pole
-int n_polar_cells_to_exclude=0; // number of polar cells to exclude if using user th bc
 
 // initial conditions
 
@@ -123,25 +122,11 @@ void DiskInnerX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceF
 void DiskOuterX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh);
-void PoleInnerX2(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
-                 Real time, Real dt,
-                 int il, int iu, int jl, int ju, int kl, int ku, int ngh);
-void PoleOuterX2(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
-                 Real time, Real dt,
-                 int il, int iu, int jl, int ju, int kl, int ku, int ngh);
 void RadInnerX1(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
                 const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
                 Real time, Real dt,
                 int is, int ie, int js, int je, int ks, int ke, int ngh);
 void RadOuterX1(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
-                const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
-                Real time, Real dt,
-                int is, int ie, int js, int je, int ks, int ke, int ngh);
-void RadInnerX2(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
-                const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
-                Real time, Real dt,
-                int is, int ie, int js, int je, int ks, int ke, int ngh);
-void RadOuterX2(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
                 const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
                 Real time, Real dt,
                 int is, int ie, int js, int je, int ks, int ke, int ngh);
@@ -172,16 +157,6 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
     nth_hi   = pin->GetReal("mesh","nth_hi");
     h_hi     = pin->GetReal("mesh","h_hi");
     dth_pole = pin->GetReal("mesh","dth_pole");
-  }
-  if (mesh_bcs[BoundaryFace::inner_x2] == GetBoundaryFlag("user") ||
-      mesh_bcs[BoundaryFace::outer_x2] == GetBoundaryFlag("user")) {
-    n_polar_cells_to_exclude = pin->GetInteger("mesh","n_polar_cells_to_exclude");
-    if (n_polar_cells_to_exclude<2 || n_polar_cells_to_exclude>=block_size.nx2) {
-      std::stringstream msg;
-      msg << "### FATAL ERROR in InitUserMeshData" << std::endl
-          << "invalid n_polar_cells_to_exclude";
-      ATHENA_ERROR(msg);
-    }
   }
   // initial conditions
   read_from_2d = pin->GetOrAddBoolean("problem","read_from_2d",read_from_2d);
@@ -234,14 +209,6 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   if (mesh_bcs[BoundaryFace::outer_x1] == GetBoundaryFlag("user")) {
     EnrollUserBoundaryFunction(BoundaryFace::outer_x1, DiskOuterX1);
     if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) EnrollUserRadBoundaryFunction(BoundaryFace::outer_x1, RadOuterX1);
-  }
-  if (mesh_bcs[BoundaryFace::inner_x2] == GetBoundaryFlag("user")) {
-    EnrollUserBoundaryFunction(BoundaryFace::inner_x2, PoleInnerX2);
-    if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) EnrollUserRadBoundaryFunction(BoundaryFace::inner_x2, RadInnerX2);
-  }
-  if (mesh_bcs[BoundaryFace::outer_x2] == GetBoundaryFlag("user")) {
-    EnrollUserBoundaryFunction(BoundaryFace::outer_x2, PoleOuterX2);
-    if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) EnrollUserRadBoundaryFunction(BoundaryFace::outer_x2, RadOuterX2);
   }
   // mesh generator
   if (pin->GetOrAddReal("mesh","x2rat",1.0)<0.)
@@ -400,33 +367,8 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin) {
       }
     }
 
-    // initialize radiation: just initialize to 0 because radiation energy density and pressure are negligible and the system will quickly get close to equilibirum
+    // radiation
     if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) pnrrad->ir.ZeroClear();
-    
-    
-    /*if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) {
-      const Real gamma = peos->GetGamma();
-      const Real a = pnrrad->prat;
-      const Real c = pnrrad->crat;
-      for (int k=ks; k<=ke; ++k) {
-        for (int j=js; j<=je; ++j) {
-          for (int i=is; i<=ie; ++i) {
-            Real p = (gamma-1.) * (phydro->u(IEN,k,j,i) - .5*(SQR(phydro->u(IM1,k,j,i)) + SQR(phydro->u(IM2,k,j,i)) + SQR(phydro->u(IM3,k,j,i)))/phydro->u(IDN,k,j,i));
-            Real T = p/phydro->u(IDN,k,j,i);
-            T = std::min(0.01, T); // temperature cap - not good
-            Real tau = kappa * phydro->u(IDN,k,j,i) * pcoord->x1v(i) * 0.05; // estimate tau
-            //Real I = a*c*T*T*T*T/(4.*PI); // single-frequency blackbody
-            for (int ifr=0; ifr<pnrrad->nfreq; ++ifr) {
-              for (int n=0; n<pnrrad->nang; ++n) {
-                //pnrrad->ir(k,j,i,ifr*pnrrad->nang+n) = I;
-                pnrrad->ir(k,j,i,ifr*pnrrad->nang+n) = std::pow(T,4) * (1.-std::exp(-tau));
-              }
-            }
-          }
-        }
-      }
-    }*/
-    
   }
 
   else { // case 3. make new initial condition
@@ -461,27 +403,8 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin) {
       }
     }
     
-    // initialize radiation: start with zero (a good choice because choosing T_rad=T(R) leaves too much radiation at pole)
-    if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) {
-      pnrrad->ir.ZeroClear();
-      /*const Real gamma = peos->GetGamma();
-      Real T_d = SQR(PI*G*Sigma_d*Qd/std::sqrt(G*Mtot/Rd/Rd/Rd))/gamma; // T at Rd
-      for (int k=ks; k<=ke; ++k) {
-        for (int j=js; j<=je; ++j) {
-          for (int i=is; i<=ie; ++i) {
-            Real r = pcoord->x1v(i);
-            Real th = pcoord->x2v(j);
-            Real R = r*std::sin(th);
-            Real T = T_d * std::pow(R/Rd, T_slope);
-            for (int ifr=0; ifr<pnrrad->nfreq; ++ifr) {
-              for (int n=0; n<pnrrad->nang; ++n) {
-                pnrrad->ir(k,j,i,ifr*pnrrad->nang+n) = std::pow(T,4);
-              }
-            }
-          }
-        }
-      }*/
-    }
+    // radiation
+    if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) pnrrad->ir.ZeroClear();
   }
 }
 
@@ -568,22 +491,10 @@ void DiskOpacity(MeshBlock *pmb, AthenaArray<Real> &prim) {
     kl -= NGHOST;
     ku += NGHOST;
   }
-  Real dfloor = pmb->peos->GetDensityFloor();
-  int jal=jl, jau=ju;
-  if (n_polar_cells_to_exclude>0) {
-    if (pmb->loc.lx2==0)
-      jal = pmb->js+n_polar_cells_to_exclude;
-    if (pmb->loc.lx2==pmb->pmy_mesh->mesh_size.nx2/pmb->block_size.nx2-1)
-      jau = pmb->je-n_polar_cells_to_exclude;
-  }
   for (int k=kl; k<=ku; ++k) {
     for (int j=jl; j<=ju; ++j) {
       for (int i=il; i<=iu; ++i) {
-        Real sigma;
-        if (j<jal || j>jau)
-          sigma = dfloor*kappa;
-        else
-          sigma = prim(IDN,k,j,i) * kappa;
+        Real sigma = prim(IDN,k,j,i) * kappa;
         for (int ifr=0; ifr<pnrrad->nfreq; ++ifr){
           pnrrad->sigma_s(k,j,i,ifr) = 0.0;
           pnrrad->sigma_a(k,j,i,ifr) = sigma;
@@ -704,94 +615,6 @@ void DiskInnerX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
   }
 }
 
-// theta boundary: apply bc a few cells away from the pole
-void PoleOuterX2(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
-                 Real time, Real dt,
-                 int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
-  int jb = pmb->je-n_polar_cells_to_exclude; // last active cell
-  Real dfloor = pmb->peos->GetDensityFloor();
-  Real pfloor = pmb->peos->GetPressureFloor();
-  Real gamma = pmb->peos->GetGamma();
-  for (int k=kl; k<=ku; ++k) {
-    // physical bc: maintain rotation but reflect other directions
-    for (int j=jb+1; j<=jb+ngh; ++j) {
-      Real R_ratio = std::sin(pco->x2v(jb))/std::sin(pco->x2v(j));
-        // boundary R / this R
-      for (int i=il; i<=iu; ++i) {
-        prim(IDN,k,j,i) = prim(IDN,k,jb,i);
-        prim(IPR,k,j,i) = prim(IPR,k,jb,i);
-        prim(IVX,k,j,i) = -prim(IVX,k,jb,i);
-        prim(IVY,k,j,i) = -prim(IVY,k,jb,i);
-        prim(IVZ,k,j,i) = prim(IVZ,k,jb,i)*R_ratio;
-        pmb->phydro->u(IDN,k,j,i) = dfloor;
-        pmb->phydro->u(IEN,k,j,i) = pfloor/(gamma-1.);
-        pmb->phydro->u(IM1,k,j,i) = 0.;
-        pmb->phydro->u(IM2,k,j,i) = 0.;
-        pmb->phydro->u(IM3,k,j,i) = 0.;
-      }
-    }
-    // set everything to 0
-    for (int j=jb+ngh+1; j<=pmb->je+ngh; ++j) {
-      for (int i=il; i<=iu; ++i) {
-        prim(IDN,k,j,i) = dfloor;
-        prim(IPR,k,j,i) = pfloor;
-        prim(IVX,k,j,i) = 0.;
-        prim(IVY,k,j,i) = 0.;
-        prim(IVZ,k,j,i) = 0.;
-        pmb->phydro->u(IDN,k,j,i) = dfloor;
-        pmb->phydro->u(IEN,k,j,i) = pfloor/(gamma-1.);
-        pmb->phydro->u(IM1,k,j,i) = 0.;
-        pmb->phydro->u(IM2,k,j,i) = 0.;
-        pmb->phydro->u(IM3,k,j,i) = 0.;
-      }
-    }
-  }
-}
-
-// theta boundary: apply bc a few cells away from the pole
-void PoleInnerX2(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
-                 Real time, Real dt,
-                 int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
-  int jb = pmb->js+n_polar_cells_to_exclude; // last active cell
-  Real dfloor = pmb->peos->GetDensityFloor();
-  Real pfloor = pmb->peos->GetPressureFloor();
-  Real gamma = pmb->peos->GetGamma();
-  for (int k=kl; k<=ku; ++k) {
-    // physical bc: maintain rotation but reflect other directions
-    for (int j=jb-1; j>=jb-ngh; --j) {
-      Real R_ratio = std::sin(pco->x2v(jb))/std::sin(pco->x2v(j));
-        // boundary R / this R
-      for (int i=il; i<=iu; ++i) {
-        prim(IDN,k,j,i) = prim(IDN,k,jb,i);
-        prim(IPR,k,j,i) = prim(IPR,k,jb,i);
-        prim(IVX,k,j,i) = -prim(IVX,k,jb,i);
-        prim(IVY,k,j,i) = -prim(IVY,k,jb,i);
-        prim(IVZ,k,j,i) = prim(IVZ,k,jb,i)*R_ratio;
-        pmb->phydro->u(IDN,k,j,i) = dfloor;
-        pmb->phydro->u(IEN,k,j,i) = pfloor/(gamma-1.);
-        pmb->phydro->u(IM1,k,j,i) = 0.;
-        pmb->phydro->u(IM2,k,j,i) = 0.;
-        pmb->phydro->u(IM3,k,j,i) = 0.;
-      }
-    }
-    // set everything to 0
-    for (int j=jb-ngh-1; j>=pmb->js-ngh; --j) {
-      for (int i=il; i<=iu; ++i) {
-        prim(IDN,k,j,i) = dfloor;
-        prim(IPR,k,j,i) = pfloor;
-        prim(IVX,k,j,i) = 0.;
-        prim(IVY,k,j,i) = 0.;
-        prim(IVZ,k,j,i) = 0.;
-        pmb->phydro->u(IDN,k,j,i) = dfloor;
-        pmb->phydro->u(IEN,k,j,i) = pfloor/(gamma-1.);
-        pmb->phydro->u(IM1,k,j,i) = 0.;
-        pmb->phydro->u(IM2,k,j,i) = 0.;
-        pmb->phydro->u(IM3,k,j,i) = 0.;
-      }
-    }
-  }
-}
-
 // r boundary: vacuum
 void RadInnerX1(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
                 const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
@@ -832,74 +655,6 @@ void RadOuterX1(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
       }
     }
   }
-}
-
-// copied from bvals/cc/nr_radiation/reflect_rad.cpp
-void MyCopyIntensity(Real *iri, Real *iro, int li, int lo, int n_ang) {
-  // here ir is only intensity for each cell and each frequency band
-  for (int n=0; n<n_ang; ++n) {
-    int angi = li * n_ang + n;
-    int ango = lo * n_ang + n;
-    iro[angi] = iri[ango];
-    iro[ango] = iri[angi];
-  }
-}
-
-// theta boundary: reflecting (copied from bvals/cc/nr_radiation/reflect_rad.cpp)
-// TODO: see if Yanfei has a better idea?
-void RadInnerX2(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
-                const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
-                Real time, Real dt,
-                int il, int iu, int jl, int ju, int kl, int ku, int ngh){
-  int &noct = pmb->pnrrad->noct;
-  int n_ang = pmb->pnrrad->nang/noct; // angles per octant
-  int &nfreq = pmb->pnrrad->nfreq; // number of frequency bands
-
-  for (int k=kl; k<=ku; ++k) {
-    for (int j=1; j<=ngh; ++j) {
-      for (int i=il; i<=iu; ++i) {
-        for (int ifr=0; ifr<nfreq; ++ifr) {
-          Real *iri = &ir(k,jl+j-1,i,ifr*pmb->pnrrad->nang);
-          Real *iro = &ir(k,jl-j,i, ifr*pmb->pnrrad->nang);
-          MyCopyIntensity(iri, iro, 0, 2, n_ang);
-          MyCopyIntensity(iri, iro, 1, 3, n_ang);
-
-          if (noct > 3) {
-            MyCopyIntensity(iri, iro, 4, 6, n_ang);
-            MyCopyIntensity(iri, iro, 5, 7, n_ang);
-          }
-        }
-      }
-    }
-  }
-  return;
-}
-void RadOuterX2(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
-                const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
-                Real time, Real dt,
-                int il, int iu, int jl, int ju, int kl, int ku, int ngh){
-  int &noct = pmb->pnrrad->noct;
-  int n_ang = pmb->pnrrad->nang/noct; // angles per octant
-  int &nfreq = pmb->pnrrad->nfreq; // number of frequency bands
-
-  for (int k=kl; k<=ku; ++k) {
-    for (int j=1; j<=ngh; ++j) {
-      for (int i=il; i<=iu; ++i) {
-        for (int ifr=0; ifr<nfreq; ++ifr) {
-          Real *iri = &ir(k,ju-j+1,i,ifr*pmb->pnrrad->nang);
-          Real *iro = &ir(k,ju+j,i, ifr*pmb->pnrrad->nang);
-          MyCopyIntensity(iri, iro, 0, 2, n_ang);
-          MyCopyIntensity(iri, iro, 1, 3, n_ang);
-
-          if (noct > 3) {
-            MyCopyIntensity(iri, iro, 4, 6, n_ang);
-            MyCopyIntensity(iri, iro, 5, 7, n_ang);
-          }
-        }
-      }
-    }
-  }
-  return;
 }
 
 
