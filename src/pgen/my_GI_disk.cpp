@@ -84,6 +84,11 @@ Real hypercool_density_threshold = 1.e-8;
 
 Real kappa = 0.;
 
+// radiation boundary condition: true for vacuum, false for outflow
+
+bool vacuum_inner_x1 = false;
+bool vacuum_outer_x1 = false;
+
 // relaxation (used for making ic)
 
 bool relaxation = false;
@@ -177,6 +182,9 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   }
   // radiation
   kappa = pin->GetOrAddReal("problem","kappa",kappa);
+  // radiation boundary
+  vacuum_inner_x1 = pin->GetOrAddBoolean("problem","vacuum_inner_x1",vacuum_inner_x1);
+  vacuum_outer_x1 = pin->GetOrAddBoolean("problem","vacuum_outer_x1",vacuum_outer_x1);
   // relaxation (used for making ic)
   relaxation = pin->GetOrAddBoolean("problem","relaxation",relaxation);
   // initial perturbation
@@ -394,7 +402,7 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin) {
           phydro->u(IDN,k,j,i) = rho_mid * std::exp(-.5*SQR(z/H));
           phydro->u(IM1,k,j,i) = 0.;
           phydro->u(IM2,k,j,i) = 0.;
-          phydro->u(IM3,k,j,i) = phydro->u(IDN,k,j,i) * std::sqrt(1./R);
+          phydro->u(IM3,k,j,i) = phydro->u(IDN,k,j,i) * std::sqrt(R*R/(r*r*r));
           if (NON_BAROTROPIC_EOS) {
             phydro->u(IEN,k,j,i) = phydro->u(IDN,k,j,i)*T/(gamma-1.)
              + .5*(SQR(phydro->u(IM1,k,j,i)) + SQR(phydro->u(IM2,k,j,i)) + SQR(phydro->u(IM3,k,j,i)))/phydro->u(IDN,k,j,i);
@@ -626,7 +634,7 @@ void RadInnerX1(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
         for(int ifr=0; ifr<pnrrad->nfreq; ++ifr) {
           for(int n=0; n<pnrrad->nang; ++n) {
             Real mu = pnrrad->mu(0,k,j,is-i,ifr*pnrrad->nang+n);
-            if (mu<0.) // flowing out - continuous
+            if (!vacuum_inner_x1 || mu<0.) // flowing out - continuous
               ir(k,j,is-i,ifr*pnrrad->nang+n) = ir(k,j,is-i+1,ifr*pnrrad->nang+n);
             else // flowing in - zero
               ir(k,j,is-i,ifr*pnrrad->nang+n) = 0.0;
@@ -646,7 +654,7 @@ void RadOuterX1(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
         for(int ifr=0; ifr<pnrrad->nfreq; ++ifr) {
           for(int n=0; n<pnrrad->nang; ++n) {
             Real mu = pnrrad->mu(0,k,j,ie+i,ifr*pnrrad->nang+n);
-            if (mu>0.) // flowing out - continuous
+            if (!vacuum_outer_x1 || mu>0.) // flowing out - continuous
               ir(k,j,ie+i,ifr*pnrrad->nang+n) = ir(k,j,ie+i-1,ifr*pnrrad->nang+n);
             else // flowing in - zero
               ir(k,j,ie+i,ifr*pnrrad->nang+n) = 0.0;
