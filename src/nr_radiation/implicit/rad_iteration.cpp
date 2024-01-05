@@ -33,6 +33,36 @@
 #include "../radiation.hpp"
 #include "radiation_implicit.hpp"
 
+// WX: below
+void SaveResidual(MeshBlock *pmb, AthenaArray<Real> &ir_old, AthenaArray<Real> &ir_new, int iout) {
+  NRRadiation *prad = pmb->pnrrad;
+  int &nang =prad->nang;
+  int &nfreq=prad->nfreq;
+  int is = pmb->is; int js = pmb->js; int ks = pmb->ks;
+  int ie = pmb->ie; int je = pmb->je; int ke = pmb->ke;
+
+  for(int k=ks; k<=ke; ++k) {
+    for(int j=js; j<=je; ++j) {
+      for(int i=is; i<=ie; ++i) {
+        Real sum_full=0., sum_diff=0.;
+        Real E = 0.;
+        for(int ifr=0; ifr<nfreq; ++ifr) {
+          Real *iro = &(ir_old(k,j,i,ifr*nang));
+          Real *irn = &(ir_new(k,j,i,ifr*nang));
+          for(int n=0; n<nang; ++n) {
+            sum_diff += std::abs(iro[n] - irn[n]);
+            sum_full += std::abs(irn[n]);
+            E += irn[n];
+          }
+        }
+        pmb->user_out_var(iout,k,j,i) = sum_diff/sum_full; // relative change
+        pmb->user_out_var(iout+10,k,j,i) = E; // energy (arbitrary normalization)
+      }
+    }
+  }
+}
+// WX: above
+
 //--------------------------------------------------------------------------------------
 // \!fn void Iteration()
 // \brief function to perform iterations
@@ -133,6 +163,13 @@ void IMRadiation::Iteration(
       for(int nb=0; nb<pm->nblocal; ++nb) {
         pmb = pm->my_blocks(nb);
         NRRadiation *prad = pmb->pnrrad;
+        // WX
+#ifdef RAD_ITR_DIAGNOSTICS
+        if (niter%10==0 && niter/10<10) {
+          SaveResidual(pmb, pmb->pnrrad->ir_old,pmb->pnrrad->ir, niter/10);
+        }
+#endif
+        // WX
         // copy the solution over
         prad->ir_old = prad->ir;
         sum_full_ += prad->sum_full;

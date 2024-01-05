@@ -13,6 +13,10 @@
 //----------------------------------------------------------------------------------------
 // macros which define physics and algorithms
 
+// WX: new options
+// whether to save extra diagnostics in implicit solver
+#define RAD_ITR_DIAGNOSTICS
+
 // configure.py dict(definitions) string values:
 
 // problem generator
