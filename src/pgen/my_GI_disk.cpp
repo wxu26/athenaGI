@@ -229,13 +229,15 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
 
   // hst outputs
 
-  AllocateUserHistoryOutput(6); // Mstar, xstar, ystar, zstar, rho_max, rho_rel_max
+  AllocateUserHistoryOutput(8); // Mstar, xstar, ystar, zstar, rho_max, rho_rel_max, T_max, v_max
   EnrollUserHistoryOutput(0, MyHst, "Mstar", UserHistoryOperation::max);
   EnrollUserHistoryOutput(1, MyHst, "xstar", UserHistoryOperation::max);
   EnrollUserHistoryOutput(2, MyHst, "ystar", UserHistoryOperation::max);
   EnrollUserHistoryOutput(3, MyHst, "zstar", UserHistoryOperation::max);
   EnrollUserHistoryOutput(4, MyHst, "rho_max", UserHistoryOperation::max);
   EnrollUserHistoryOutput(5, MyHst, "rho_rel_max", UserHistoryOperation::max);
+  EnrollUserHistoryOutput(6, MyHst, "T_max", UserHistoryOperation::max);
+  EnrollUserHistoryOutput(7, MyHst, "v_max", UserHistoryOperation::max);
     // rho_rel is relative to (extrapolated) initial midplane density
 }
 
@@ -796,8 +798,8 @@ Real MeshGen(Real x, RegionSize rs) {
 Real MyHst(MeshBlock *pmb, int iout){
   // stellar properties
   if (iout<4) return pmb->pmy_mesh->ruser_mesh_data[0](iout);
-  // max density or max relative density
-  else if (iout==4 || iout==5) {
+  // max density, relative density, temperature, or velocity
+  else if (iout==4 || iout==5 || iout==6 || iout==7) {
     int is=pmb->is, ie=pmb->ie, js=pmb->js, je=pmb->je, ks=pmb->ks, ke=pmb->ke;
     Real y_max = 0.;
     const Real gamma = pmb->peos->GetGamma();
@@ -806,8 +808,10 @@ Real MyHst(MeshBlock *pmb, int iout){
     for(int k=ks; k<=ke; k++) {
       for(int j=js; j<=je; j++) {
         for(int i=is; i<=ie; i++) {
-          Real y = pmb->phydro->u(IDN,k,j,i);
-          if (iout==5) {
+          Real y;
+          if (iout==4) {y = pmb->phydro->u(IDN,k,j,i);}
+          else if (iout==5) {
+            y = pmb->phydro->u(IDN,k,j,i);
             // find rho_mid; this is similar to what we do in ProblemGenerator()
             Real r = pmb->pcoord->x1v(i);
             Real th = pmb->pcoord->x2v(j);
@@ -817,6 +821,12 @@ Real MyHst(MeshBlock *pmb, int iout){
             Real H = std::sqrt(T) / std::sqrt(G*Mtot/(R*R*R));
             Real rho_mid = Sigma/H/std::sqrt(2.*PI);
             y /= rho_mid;
+          }
+          else if (iout==6) {
+            y = pmb->phydro->w(IPR,k,j,i)/pmb->phydro->w(IDN,k,j,i);
+          }
+          else if (iout==7) {
+            y = std::sqrt(SQR(pmb->phydro->w(IVX,k,j,i))+SQR(pmb->phydro->w(IVY,k,j,i))+SQR(pmb->phydro->w(IVZ,k,j,i)));
           }
           if (y>y_max) y_max = y;
         }
