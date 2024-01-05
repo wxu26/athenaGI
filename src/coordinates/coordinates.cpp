@@ -189,12 +189,13 @@ Coordinates::Coordinates(MeshBlock *pmb, ParameterInput *pin, bool flag) :
           rmax = std::max(dx2f(j+1)/dx2f(j),rmax);
           rmin = std::min(dx2f(j+1)/dx2f(j),rmin);
         }
-        if (rmax > 1.1 || rmin  < 1.0/1.1) {
-          std::cout
-              << "### Warning in Coordinates constructor" << std::endl
-              << "Neighboring cell sizes differ by more than 10% in the x2 direction."
-              << std::endl;
-        }
+	// WX: skip warning for x2rat
+        //if (rmax > 1.1 || rmin  < 1.0/1.1) {
+        //  std::cout
+        //      << "### Warning in Coordinates constructor" << std::endl
+        //      << "Neighboring cell sizes differ by more than 10% in the x2 direction."
+        //      << std::endl;
+        //}
       }
 
     } else {
