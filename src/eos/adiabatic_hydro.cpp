@@ -20,6 +20,9 @@
 #include "../parameter_input.hpp"
 #include "eos.hpp"
 
+// WX
+#define TEMP_FLOOR 1e-4
+
 // EquationOfState constructor
 
 EquationOfState::EquationOfState(MeshBlock *pmb, ParameterInput *pin) :
@@ -71,8 +74,9 @@ void EquationOfState::ConservedToPrimitive(
         w_p = gm1*(u_e - e_k);
 
         // apply pressure floor, correct total energy
-        u_e = (w_p > pressure_floor_) ?  u_e : ((pressure_floor_/gm1) + e_k);
-        w_p = (w_p > pressure_floor_) ?  w_p : pressure_floor_;
+        Real pf = TEMP_FLOOR*w_d;
+        u_e = (w_p > pf) ?  u_e : ((pf/gm1) + e_k);
+        w_p = (w_p > pf) ?  w_p : pf;
       }
     }
   }
@@ -137,7 +141,8 @@ void EquationOfState::ApplyPrimitiveFloors(AthenaArray<Real> &prim, int k, int j
   // apply (prim) density floor
   w_d = (w_d > density_floor_) ?  w_d : density_floor_;
   // apply pressure floor
-  w_p = (w_p > pressure_floor_) ?  w_p : pressure_floor_;
+  Real pf = TEMP_FLOOR*w_d;
+  w_p = (w_p > pf) ?  w_p : pf;
 
   return;
 }
@@ -163,10 +168,11 @@ void EquationOfState::ApplyPrimitiveConservedFloors(
   Real e_k = 0.5*w_d*(SQR(prim(IVX,k,j,i)) + SQR(prim(IVY,k,j,i))
                       + SQR(prim(IVZ,k,j,i)));
   // apply pressure floor, correct total energy
-  u_e = (w_p > pressure_floor_) ?
-        u_e : ((pressure_floor_/gm1) + e_k);
-  w_p = (w_p > pressure_floor_) ?
-        w_p : pressure_floor_;
+  Real pf = TEMP_FLOOR*w_d;
+  u_e = (w_p > pf) ?
+        u_e : ((pf/gm1) + e_k);
+  w_p = (w_p > pf) ?
+        w_p : pf;
 
   return;
 }
