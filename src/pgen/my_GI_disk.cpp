@@ -248,8 +248,10 @@ void MeshBlock::InitUserMeshBlockData(ParameterInput *pin) {
 
   if(NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) pnrrad->EnrollOpacityFunction(DiskOpacity);
 #ifdef RAD_ITR_DIAGNOSTICS
-  int n_save = 10*2; // difference and Er for each iteration
-  AllocateUserOutputVariables(n_save);
+  AllocateUserOutputVariables(10*2); // difference and Er for each iteration
+#endif
+#ifdef SAVE_HEATING_RATE
+  AllocateUserOutputVariables(1); // heating rate
 #endif
 }
 

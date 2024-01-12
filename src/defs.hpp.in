@@ -15,7 +15,10 @@
 
 // WX: new options
 // whether to save extra diagnostics in implicit solver
-#define RAD_ITR_DIAGNOSTICS
+//#define RAD_ITR_DIAGNOSTICS
+// whether to save the heating rate
+#define SAVE_HEATING_RATE
+// the two options above are incompatible with each other
 
 // configure.py dict(definitions) string values:
 
