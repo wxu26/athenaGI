@@ -557,6 +557,8 @@ void RadIntegrator::AddSourceTerms(MeshBlock *pmb, AthenaArray<Real> &u) {
                +SQR(pfield->bcc(IB3,k,j,i)));
         }
 
+        Real energy_old = u(IEN,k,j,i);
+
         if (prad->set_source_flag == 2) {
           Real eint = tgas_new_(k,j,i) * u(IDN,k,j,i)/gm1;
           u(IEN,k,j,i) = eint + pb + ekin;
@@ -575,6 +577,11 @@ void RadIntegrator::AddSourceTerms(MeshBlock *pmb, AthenaArray<Real> &u) {
             u(IEN,k,j,i) += e_source;
           }
         }
+
+        Real heating_rate = (u(IEN,k,j,i)-energy_old)/pmb->pmy_mesh->dt;
+#ifdef SAVE_HEATING_RATE
+        pmb->user_out_var(0,k,j,i) = heating_rate;
+#endif
       }
     }
   }
