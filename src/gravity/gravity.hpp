@@ -32,7 +32,6 @@ class MGGravityDriver;
 class Gravity {
  public:
   Gravity(MeshBlock *pmb, ParameterInput *pin);
-  ~Gravity();
 
   MeshBlock* pmy_block;  // ptr to MeshBlock containing this Field
   AthenaArray<Real> phi, coarse_phi;   // gravitational potential
@@ -53,7 +52,6 @@ class Gravity {
   friend class MGGravityDriver;
 
  private:
-  MGGravity *pmg;
   bool gravity_tensor_momentum_;
   bool gravity_tensor_energy_;
   AthenaArray<Real> fbuf_[6];

@@ -52,6 +52,7 @@ class Field;
 class Particles;
 class PassiveScalars;
 class Gravity;
+class MGGravity;
 class MGGravityDriver;
 class EquationOfState;
 class FFTDriver;
@@ -125,6 +126,7 @@ class MeshBlock {
   CosmicRay *pcr;
   Field *pfield;
   Gravity *pgrav;
+  MGGravity* pmg;
   PassiveScalars *pscalars;
   EquationOfState *peos;
   OrbitalAdvection *porb;
