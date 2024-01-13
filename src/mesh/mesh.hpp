@@ -52,7 +52,6 @@ class Field;
 class Particles;
 class PassiveScalars;
 class Gravity;
-class MGGravity;
 class MGGravityDriver;
 class EquationOfState;
 class FFTDriver;
@@ -103,6 +102,7 @@ class MeshBlock {
   int gid, lid;
   int cis, cie, cjs, cje, cks, cke, cnghost;
   int gflag;
+  int nbad_d, nbad_p;
 
   // user output variables for analysis
   int nuser_out_var;
@@ -125,7 +125,6 @@ class MeshBlock {
   CosmicRay *pcr;
   Field *pfield;
   Gravity *pgrav;
-  MGGravity* pmg;
   PassiveScalars *pscalars;
   EquationOfState *peos;
   OrbitalAdvection *porb;
@@ -257,6 +256,8 @@ class Mesh {
   TaskType sts_loc;
   Real muj, nuj, muj_tilde, gammaj_tilde;
   int nbtotal, nblocal, nbnew, nbdel;
+
+  const bool fofc_enabled;
 
   int step_since_lb;
   int turb_flag; // turbulence flag

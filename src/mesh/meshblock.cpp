@@ -51,7 +51,7 @@
 MeshBlock::MeshBlock(int igid, int ilid, LogicalLocation iloc, RegionSize input_block,
            BoundaryFlag *input_bcs, Mesh *pm, ParameterInput *pin, bool ref_flag) :
     pmy_mesh(pm), loc(iloc), block_size(input_block),
-    gid(igid), lid(ilid), nuser_out_var(),
+    gid(igid), lid(ilid), nbad_d(0), nbad_p(0), nuser_out_var(),
     new_block_dt_{}, new_block_dt_hyperbolic_{}, new_block_dt_parabolic_{},
     new_block_dt_user_{},
     nreal_user_meshblock_data_(), nint_user_meshblock_data_(), cost_(1.0) {
@@ -218,8 +218,6 @@ MeshBlock::MeshBlock(int igid, int ilid, LogicalLocation iloc, RegionSize input_
     // if (this->grav_block)
     pgrav = new Gravity(this, pin);
     pbval->AdvanceCounterPhysID(CellCenteredBoundaryVariable::max_phys_id);
-    if (SELF_GRAVITY_ENABLED == 2)
-      pmg = new MGGravity(pmy_mesh->pmgrd, this);
   }
   if (NSCALARS > 0) {
     // if (this->scalars_block)
@@ -267,7 +265,7 @@ MeshBlock::MeshBlock(int igid, int ilid, Mesh *pm, ParameterInput *pin,
                      LogicalLocation iloc, RegionSize input_block,
                      BoundaryFlag *input_bcs, double icost, char *mbdata) :
     pmy_mesh(pm), loc(iloc), block_size(input_block),
-    gid(igid), lid(ilid), nuser_out_var(),
+    gid(igid), lid(ilid), nbad_d(0), nbad_p(0), nuser_out_var(),
     new_block_dt_{}, new_block_dt_hyperbolic_{}, new_block_dt_parabolic_{},
     new_block_dt_user_{},
     nreal_user_meshblock_data_(), nint_user_meshblock_data_(), cost_(icost) {
@@ -418,8 +416,6 @@ MeshBlock::MeshBlock(int igid, int ilid, Mesh *pm, ParameterInput *pin,
     // if (this->grav_block)
     pgrav = new Gravity(this, pin);
     pbval->AdvanceCounterPhysID(CellCenteredBoundaryVariable::max_phys_id);
-    if (SELF_GRAVITY_ENABLED == 2)
-      pmg = new MGGravity(pmy_mesh->pmgrd, this);
   }
 
   if (NSCALARS > 0) {
@@ -552,7 +548,6 @@ MeshBlock::~MeshBlock() {
   delete peos;
   delete porb;
   if (SELF_GRAVITY_ENABLED) delete pgrav;
-  if (SELF_GRAVITY_ENABLED == 2) delete pmg;
   if (NSCALARS > 0) delete pscalars;
 
   if (NR_RADIATION_ENABLED || IM_RADIATION_ENABLED) delete pnrrad;
