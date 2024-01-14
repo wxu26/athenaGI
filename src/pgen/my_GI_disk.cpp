@@ -451,15 +451,14 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt,
           Real r = pmb->pcoord->x1v(i);
           Real th = pmb->pcoord->x2v(j);
           Real R = r*std::sin(th);
-          Real p_goal = prim(IDN,k,j,i) * T_d * std::pow(R/Rd, T_slope);
           Real v = std::sqrt(SQR(prim(IVX,k,j,i))+SQR(prim(IVY,k,j,i)));
           Real vK = std::sqrt(G*Mtot/R);
-          Real cooling_rate = 10. * std::sqrt(G*Mtot/R/R/R);
-          cooling_rate *= (1.+hypercool_density_threshold/prim(IDN,k,j,i));
           Real damping_rate = 10. * std::sqrt(G*Mtot/R/R/R) * std::max(1., v/(0.01*vK));
-          cons(IEN,k,j,i) -= (prim(IPR,k,j,i)-p_goal) / gm1 * (1-std::exp(-dt*cooling_rate));
           cons(IM1,k,j,i) -= prim(IDN,k,j,i) * prim(IVX,k,j,i) * (1.-std::exp(-dt*damping_rate));
           cons(IM2,k,j,i) -= prim(IDN,k,j,i) * prim(IVY,k,j,i) * (1.-std::exp(-dt*damping_rate));
+	  // enforce locally isothermal EoS
+	  Real T = T_d * std::pow(R/Rd, T_slope);
+	  cons(IEN,k,j,i) = cons(IDN,k,j,i)*T/gm1 + .5/cons(IDN,k,j,i)*(SQR(cons(IM1,k,j,i))+SQR(cons(IM2,k,j,i))+SQR(cons(IM3,k,j,i)));
         }
       }
     }
