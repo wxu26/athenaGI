@@ -177,7 +177,7 @@ class EquationOfState {
 #endif
 
   Real beta;
-  bool bookkeeping;
+  bool bookkeeping = false;
   AthenaArray<Real> efloor;
 
  private:
