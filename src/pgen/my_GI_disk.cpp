@@ -187,6 +187,7 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   }
   // radiation
   kappa = pin->GetOrAddReal("problem","kappa",kappa);
+  kappa = pin->GetOrAddReal("radiation","kappa",kappa); // allow kappa to be specified in either problem or radiation
   // radiation boundary
   vacuum_inner_x1 = pin->GetOrAddBoolean("problem","vacuum_inner_x1",vacuum_inner_x1);
   vacuum_outer_x1 = pin->GetOrAddBoolean("problem","vacuum_outer_x1",vacuum_outer_x1);
