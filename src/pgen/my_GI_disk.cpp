@@ -52,6 +52,9 @@ Real nth_lo; // # of low/mid res cells (for half pi)
 Real nth_hi; // # of high res cells (for half pi)
 Real h_hi; // height of high res region (in rad)
 Real dth_pole; // cell size at pole
+int l0 = 1, m0 = 1;
+  // the domain is 1/l0 of [0,pi] in theta, and 1/m0 of [0,2pi] in phi
+  // these are computed automatically
 
 // initial conditions
 
@@ -163,6 +166,8 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
     h_hi     = pin->GetReal("mesh","h_hi");
     dth_pole = pin->GetReal("mesh","dth_pole");
   }
+  l0 = std::round(PI/(pin->GetReal("mesh","x2max")-pin->GetReal("mesh","x2min")));
+  m0 = std::round(2.*PI/(pin->GetReal("mesh","x3max")-pin->GetReal("mesh","x3min")));
   // initial conditions
   read_from_2d = pin->GetOrAddBoolean("problem","read_from_2d",read_from_2d);
   read_from_3d = pin->GetOrAddBoolean("problem","read_from_3d",read_from_3d);
@@ -391,6 +396,7 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin) {
     const Real gamma = peos->GetGamma();
     Real Sigma_d = Md/(2.*PI*Rd*Rd)/(1-std::pow(Rd_in/Rd, 2+Sigma_slope))*(2+Sigma_slope); // Sigma at Rd
     Real T_d = SQR(PI*G*Sigma_d*Qd/std::sqrt(G*Mtot/Rd/Rd/Rd))/gamma; // T at Rd
+    std::cout<<"initial Q = "<<Qd<<", h/r = "<<std::sqrt(T_d)<<std::endl;
     for (int k=ks; k<=ke; ++k) {
       for (int j=js; j<=je; ++j) {
         for (int i=is; i<=ie; ++i) {
@@ -707,6 +713,10 @@ void GetStellarMassAndLocation(SphGravity * grav, MeshBlock * pmb) {
 #ifdef MPI_PARALLEL
   MPI_Allreduce(MPI_IN_PLACE, &M, 4, MPI_ATHENA_REAL, MPI_SUM, MPI_COMM_WORLD);
 #endif
+  M[0]*=m0*l0;
+  M[1]*=m0*l0;
+  M[2]*=m0*l0;
+  M[3]*=m0*l0;
   Real M_star = Mtot - M[0];
   Real x_star = fix_star_at_origin ? 0. : -M[1]/M_star;
   Real y_star = fix_star_at_origin ? 0. : -M[2]/M_star;
