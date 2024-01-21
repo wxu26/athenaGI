@@ -76,6 +76,7 @@ bool fix_star_at_origin = false; // fix the star at origin
 int cooling_mode = 0;
   // 0: cooling off (or use radiation)
   // 1: linear cooling: t_cool = beta_cool / OmegaK
+  // 2: optically thin cooling; sigma is read from crat and prat in <radiation>
 
 Real beta_cool;
 Real hypercool_density_threshold = 1.e-8;
@@ -86,6 +87,8 @@ Real hypercool_density_threshold = 1.e-8;
 // radiation
 
 Real kappa = 0.;
+Real prat = 0.;
+Real crat = 0.;
 
 // radiation boundary condition: true for vacuum, false for outflow
 
@@ -188,6 +191,8 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   // radiation
   kappa = pin->GetOrAddReal("problem","kappa",kappa);
   kappa = pin->GetOrAddReal("radiation","kappa",kappa); // allow kappa to be specified in either problem or radiation
+  prat = pin->GetOrAddReal("radiation","prat",prat);
+  crat = pin->GetOrAddReal("radiation","crat",crat);
   // radiation boundary
   vacuum_inner_x1 = pin->GetOrAddBoolean("problem","vacuum_inner_x1",vacuum_inner_x1);
   vacuum_outer_x1 = pin->GetOrAddBoolean("problem","vacuum_outer_x1",vacuum_outer_x1);
@@ -481,6 +486,22 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt,
           Real cooling_rate = std::sqrt(G*Mtot/R/R/R)/beta_cool; // beta cooling
           cooling_rate *= (1.+hypercool_density_threshold/prim(IDN,k,j,i));
           cons(IEN,k,j,i) -= prim(IPR,k,j,i) / gm1 * (1-std::exp(-dt*cooling_rate));
+        }
+      }
+    }
+  }
+  else if (cooling_mode==2) { // case 3. optically thin cooling
+    Real four_sigma = prat*crat;
+    // rho/(gamma-1)*dT = - 4sigma * T^4 * dt
+    // T^-4 dT = - 4sigma(gamma-1)/rho * dt
+    // d(T^-3) = 12sigma(gamma-1)/rho*dt
+    for (int k = pmb->ks; k <= pmb->ke; ++k) {
+      for (int j = pmb->js; j <= pmb->je; ++j) {
+        for (int i = pmb->is; i <= pmb->ie; ++i) {
+          Real Ek = .5/cons(IDN,k,j,i)*(SQR(cons(IM1,k,j,i))+SQR(cons(IM2,k,j,i))+SQR(cons(IM3,k,j,i)));
+          Real T_old = (cons(IEN,k,j,i) - Ek)*gm1/cons(IDN,k,j,i);
+          Real T_new = std::pow(std::pow(T_old,-3) + 3.*four_sigma*gm1/cons(IDN,k,j,i)*dt, -1./3.);
+          cons(IEN,k,j,i) += (T_new-T_old)*cons(IDN,k,j,i)/gm1;
         }
       }
     }
