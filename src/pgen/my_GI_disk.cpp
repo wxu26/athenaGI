@@ -492,16 +492,16 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt,
   }
   else if (cooling_mode==2) { // case 3. optically thin cooling
     Real four_sigma = prat*crat;
-    // rho/(gamma-1)*dT = - 4sigma * T^4 * dt
-    // T^-4 dT = - 4sigma(gamma-1)/rho * dt
-    // d(T^-3) = 12sigma(gamma-1)/rho*dt
+    // rho/(gamma-1)*dT = - 4sigma*rho*kappa * T^4 * dt
+    // T^-4 dT = - 4sigma(gamma-1)*kappa * dt
+    // d(T^-3) = 12sigma(gamma-1)*kappa*dt
     for (int k = pmb->ks; k <= pmb->ke; ++k) {
       for (int j = pmb->js; j <= pmb->je; ++j) {
         for (int i = pmb->is; i <= pmb->ie; ++i) {
           Real Ek = .5/cons(IDN,k,j,i)*(SQR(cons(IM1,k,j,i))+SQR(cons(IM2,k,j,i))+SQR(cons(IM3,k,j,i)));
           Real T_old = (cons(IEN,k,j,i) - Ek)*gm1/cons(IDN,k,j,i);
-	  T_old = std::max(T_old, 1.e-6); // make sure T_old is non negative
-          Real T_new = std::pow(std::pow(T_old,-3) + 3.*four_sigma*gm1/cons(IDN,k,j,i)*dt, -1./3.);
+          T_old = std::max(T_old, 1.e-6); // make sure T_old is non negative
+          Real T_new = std::pow(std::pow(T_old,-3) + 3.*four_sigma*gm1*kappa*dt, -1./3.);
           cons(IEN,k,j,i) += (T_new-T_old)*cons(IDN,k,j,i)/gm1;
         }
       }
