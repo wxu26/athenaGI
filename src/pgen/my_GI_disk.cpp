@@ -500,6 +500,7 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt,
         for (int i = pmb->is; i <= pmb->ie; ++i) {
           Real Ek = .5/cons(IDN,k,j,i)*(SQR(cons(IM1,k,j,i))+SQR(cons(IM2,k,j,i))+SQR(cons(IM3,k,j,i)));
           Real T_old = (cons(IEN,k,j,i) - Ek)*gm1/cons(IDN,k,j,i);
+	  T_old = std::max(T_old, 1.e-6); // make sure T_old is non negative
           Real T_new = std::pow(std::pow(T_old,-3) + 3.*four_sigma*gm1/cons(IDN,k,j,i)*dt, -1./3.);
           cons(IEN,k,j,i) += (T_new-T_old)*cons(IDN,k,j,i)/gm1;
         }
