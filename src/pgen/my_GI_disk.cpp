@@ -141,6 +141,13 @@ void RadOuterX1(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
                 const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
                 Real time, Real dt,
                 int is, int ie, int js, int je, int ks, int ke, int ngh);
+void MidplaneHyd(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
+                 Real time, Real dt,
+                 int il, int iu, int jl, int ju, int kl, int ku, int ngh);
+void MidplaneRad(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
+                 const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
+                 Real time, Real dt,
+                 int is, int ie, int js, int je, int ks, int ke, int ngh);
 
 void GetStellarMassAndLocation(SphGravity * grav, MeshBlock * pmb);
 
@@ -228,6 +235,16 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   if (mesh_bcs[BoundaryFace::outer_x1] == GetBoundaryFlag("user")) {
     EnrollUserBoundaryFunction(BoundaryFace::outer_x1, DiskOuterX1);
     if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) EnrollUserRadBoundaryFunction(BoundaryFace::outer_x1, RadOuterX1);
+  }
+  if (mesh_bcs[BoundaryFace::outer_x2] == GetBoundaryFlag("user")) {
+    EnrollUserBoundaryFunction(BoundaryFace::outer_x2, MidplaneHyd);
+    if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) EnrollUserRadBoundaryFunction(BoundaryFace::outer_x2, MidplaneRad);
+  }
+  if (IM_RADIATION_ENABLED && mesh_bcs[BoundaryFace::outer_x2] == GetBoundaryFlag("reflecting")) {
+    std::stringstream msg;
+    msg << "### FATAL ERROR in Mesh::InitUserMeshData" << std::endl
+        << "for implicit radiation, reflecting bc is not working now; use user bc instead";
+    ATHENA_ERROR(msg);
   }
   // mesh generator
   if (pin->GetOrAddReal("mesh","x2rat",1.0)<0.)
@@ -659,6 +676,23 @@ void DiskInnerX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
   }
 }
 
+// midplane: reflecting
+void MidplaneHyd(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
+                 Real time, Real dt,
+                 int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
+  for (int k=kl; k<=ku; ++k) {
+    for (int j=1; j<=ngh; ++j) {
+      for (int i=il; i<=iu; ++i) {
+        prim(IDN,k,ju+j,i) = prim(IDN,k,ju-j+1,i);
+        prim(IVX,k,ju+j,i) = prim(IVX,k,ju-j+1,i);
+        prim(IVY,k,ju+j,i) = -prim(IVY,k,ju-j+1,i);
+        prim(IVZ,k,ju+j,i) = prim(IVZ,k,ju-j+1,i);
+        prim(IPR,k,ju+j,i) = prim(IPR,k,ju-j+1,i);
+      }
+    }
+  }
+}
+
 // r boundary: vacuum
 void RadInnerX1(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
                 const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
@@ -694,6 +728,42 @@ void RadOuterX1(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
               ir(k,j,ie+i,ifr*pnrrad->nang+n) = ir(k,j,ie+i-1,ifr*pnrrad->nang+n);
             else // flowing in - zero
               ir(k,j,ie+i,ifr*pnrrad->nang+n) = 0.0;
+          }
+        }
+      }
+    }
+  }
+}
+
+// midplane: reflecting
+void MyCopyIntensity(Real *iri, Real *iro, int li, int lo, int n_ang) {
+  // here ir is only intensity for each cell and each frequency band
+  for (int n=0; n<n_ang; ++n) {
+    int angi = li * n_ang + n;
+    int ango = lo * n_ang + n;
+    iro[angi] = iri[ango];
+    iro[ango] = iri[angi];
+  }
+}
+void MidplaneRad(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
+                 const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
+                 Real time, Real dt,
+                 int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
+  int &noct = pnrrad->noct;
+  int n_ang = pnrrad->nang/noct; // angles per octant
+  int &nfreq = pnrrad->nfreq; // number of frequency bands
+
+  for (int k=kl; k<=ku; ++k) {
+    for (int j=1; j<=ngh; ++j) {
+      for (int i=il; i<=iu; ++i) {
+        for (int ifr=0; ifr<nfreq; ++ifr) {
+          Real *iri = &ir(k,ju-j+1,i,ifr*pnrrad->nang);
+          Real *iro = &ir(k,ju+j,i, ifr*pnrrad->nang);
+          MyCopyIntensity(iri, iro, 0, 2, n_ang);
+          MyCopyIntensity(iri, iro, 1, 3, n_ang);
+          if (noct > 4) {
+            MyCopyIntensity(iri, iro, 4, 6, n_ang);
+            MyCopyIntensity(iri, iro, 5, 7, n_ang);
           }
         }
       }
