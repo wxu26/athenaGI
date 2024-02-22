@@ -436,7 +436,7 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin) {
           if (R<Rd) MR = Mtot - 2.*PI * Sigma_d * (1.-std::pow(R/Rd, 2+Sigma_slope)) / (2+Sigma_slope); // M(<R)
           Real H = std::sqrt(T) / std::sqrt(G*MR/(R*R*R)); // computed using isothermal sound speed cs_iso = sqrt(T)
           Real rho_mid = Sigma/H/std::sqrt(2.*PI);
-          phydro->u(IDN,k,j,i) = rho_mid * std::exp(-.5*SQR(z/H));
+          phydro->u(IDN,k,j,i) = std::max(1.e-16, rho_mid * std::exp(-.5*SQR(z/H))); // just a hard-coded density floor
           phydro->u(IM1,k,j,i) = 0.;
           phydro->u(IM2,k,j,i) = 0.;
           phydro->u(IM3,k,j,i) = phydro->u(IDN,k,j,i) * std::sqrt(R*R/(r*r*r));
