@@ -186,15 +186,59 @@ void Hydro::FirstOrderFluxCorrection(Real delta, Real gam0, Real gam1, Real beta
 
 #endif
 
-  // test only active zones
+  // boundary communication for utest_; only face is necessary
+  // this simple fix is essentially blocking and assumes one meshblock per process + no mesh refinement.
+  pmb->peos->fofc_bvar.StartReceiving(BoundaryCommSubset::all);
+  pmb->peos->fofc_bvar.SendBoundaryBuffers();
+  bool rec=false;
+  while (!rec) {
+    rec = pmb->peos->fofc_bvar.ReceiveBoundaryBuffers();
+  }
+  pmb->peos->fofc_bvar.SetBoundaries();
+  pmb->peos->fofc_bvar.ClearBoundary(BoundaryCommSubset::all);
+
+  // test one extra cell in ghost zone to make sure we get the right boundaries
   // utest_(IEN) must be e_int + e_k excluding e_mag even if MHD
-  pmb->peos->ConservedToPrimitiveTest(utest_, bcctest_, is, ie, js, je, ks, ke);
+  pmb->peos->ConservedToPrimitiveTest(utest_, bcctest_, is-1, ie+1, js-1, je+1, ks-1, ke+1);
+
+  // for any bdry where active cell is not adjacent to another block, set fofc to false
+  if (pmb->pbval->block_bcs[BoundaryFace::inner_x1]!=BoundaryFlag::block &&
+      pmb->pbval->block_bcs[BoundaryFace::inner_x1]!=BoundaryFlag::periodic &&
+      pmb->pbval->block_bcs[BoundaryFace::inner_x1]!=BoundaryFlag::polar) {
+    for (int k=ks-1; k<=ke+1; ++k) {
+      for (int j=js-1; j<=je+1; ++j) {
+        int i = is-1;
+        pmb->peos->fofc_(k,j,i) = false;
+      }
+    }
+  }
+  if (pmb->pbval->block_bcs[BoundaryFace::outer_x1]!=BoundaryFlag::block &&
+      pmb->pbval->block_bcs[BoundaryFace::outer_x1]!=BoundaryFlag::periodic &&
+      pmb->pbval->block_bcs[BoundaryFace::outer_x1]!=BoundaryFlag::polar) {
+    for (int k=ks-1; k<=ke+1; ++k) {
+      for (int j=js-1; j<=je+1; ++j) {
+        int i = ie+1;
+        pmb->peos->fofc_(k,j,i) = false;
+      }
+    }
+  }
+  if (pmb->pbval->block_bcs[BoundaryFace::outer_x2]!=BoundaryFlag::block &&
+      pmb->pbval->block_bcs[BoundaryFace::outer_x2]!=BoundaryFlag::periodic &&
+      pmb->pbval->block_bcs[BoundaryFace::outer_x2]!=BoundaryFlag::polar) {
+    for (int k=ks-1; k<=ke+1; ++k) {
+      for (int i=is-1; i<=ie+1; ++i) {
+        int j = je+1;
+        pmb->peos->fofc_(k,j,i) = false;
+      }
+    }
+  }
 
   // now replace fluxes with first-order fluxes
-  for (int k=ks+1; k<=ke-1; ++k) {
-    for (int j=js+1; j<=je-1; ++j) {
+  // go one extra cell to make sure boundary is consistent
+  for (int k=ks-1; k<=ke+1; ++k) {
+    for (int j=js-1; j<=je+1; ++j) {
 #pragma omp simd
-      for (int i=is+1; i<=ie-1; ++i) {
+      for (int i=is-1; i<=ie+1; ++i) {
         if (pmb->peos->fofc_(k,j,i)) {
           #if MAGNETIC_FIELDS_ENABLED
             ApplyFOFC_MHD(i,j,k);

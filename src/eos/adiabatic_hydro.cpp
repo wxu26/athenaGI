@@ -28,7 +28,11 @@ EquationOfState::EquationOfState(MeshBlock *pmb, ParameterInput *pin) :
     gamma_{pin->GetReal("hydro", "gamma")},
     density_floor_{pin->GetOrAddReal("hydro", "dfloor", std::sqrt(1024*float_min))},
     pressure_floor_{pin->GetOrAddReal("hydro", "pfloor", std::sqrt(1024*float_min))},
-    scalar_floor_{pin->GetOrAddReal("hydro", "sfloor", std::sqrt(1024*float_min))} {
+    scalar_floor_{pin->GetOrAddReal("hydro", "sfloor", std::sqrt(1024*float_min))},
+    fofc_bvar(pmb, &pmb->phydro->utest_, nullptr, nullptr, false) {
+
+      fofc_bvar.bvar_index = pmb->pbval->bvars.size();
+      pmb->pbval->bvars.push_back(&fofc_bvar);
 
       if (pmb->phydro->fofc_enabled)
         fofc_.NewAthenaArray(pmb->ncells3, pmb->ncells2, pmb->ncells1);

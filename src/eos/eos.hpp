@@ -18,6 +18,8 @@
 // Athena++ headers
 #include "../athena.hpp"         // Real
 #include "../athena_arrays.hpp"  // AthenaArray
+#include "../bvals/bvals.hpp"
+#include "../bvals/cc/bvals_cc.hpp"
 #include "../coordinates/coordinates.hpp" // Coordinates
 #include "../utils/interp_table.hpp"
 
@@ -179,6 +181,8 @@ class EquationOfState {
   Real beta;
   bool bookkeeping = false;
   AthenaArray<Real> efloor;
+
+  CellCenteredBoundaryVariable fofc_bvar;
 
  private:
   // (C++11) in-class Default Member Initializer (fallback option):

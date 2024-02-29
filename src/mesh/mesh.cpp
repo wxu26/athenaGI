@@ -1490,6 +1490,8 @@ void Mesh::Initialize(int res_flag, ParameterInput *pin) {
         pmb->pgrav->gbvar.SetupPersistentMPI();
       if (IM_RADIATION_ENABLED)
         pmb->pnrrad->rad_bvar.SetupPersistentMPI();
+      if (pin->GetOrAddBoolean("hydro", "fofc", "false"))
+        pmb->peos->fofc_bvar.SetupPersistentMPI();
     }
 
     // solve gravity for the first time

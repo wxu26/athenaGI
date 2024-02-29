@@ -145,8 +145,8 @@ Hydro::Hydro(MeshBlock *pmb, ParameterInput *pin) :
     laplacian_r_fc_.NewAthenaArray(nc1);
   }
 
+  utest_.NewAthenaArray(NHYDRO, nc3, nc2, nc1); // WX: always have utest, because it's needed for fofc_bvar initialization.
   if (fofc_enabled) {
-    utest_.NewAthenaArray(NHYDRO, nc3, nc2, nc1);
     if (MAGNETIC_FIELDS_ENABLED) {
       bcctest_.NewAthenaArray(NFIELD, nc3, nc2, nc1);
     }
