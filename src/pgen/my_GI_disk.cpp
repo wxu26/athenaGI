@@ -11,6 +11,7 @@
 #include "../inputs/hdf5_reader.hpp"  // HDF5ReadRealArray()
 #include "../mesh/mesh.hpp"
 #include "../parameter_input.hpp"
+#include "../scalars/scalars.hpp"
 
 #include "../gravity/gravity.hpp"
 #include "../gravity/sph_gravity.hpp"
@@ -84,6 +85,8 @@ Real hypercool_density_threshold = 1.e-8;
   // (1+hypercool_density_threshold/density)
   // <0 to turn off hypercooling at low density
 
+Real h0=0.; // h/r corresponding to backgroud heating; no background heating by default
+
 // radiation
 
 Real kappa = 0.;
@@ -155,7 +158,7 @@ Real MeshGen(Real x, RegionSize rs);
 
 Real MyHst(MeshBlock *pmb, int iout);
 
-
+AthenaArray<Real> dust_flx;
 
 
 
@@ -195,6 +198,7 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
     beta_cool = pin->GetReal("problem","beta_cool");
     hypercool_density_threshold = pin->GetOrAddReal("problem","hypercool_density_threshold",hypercool_density_threshold);
   }
+  h0 = pin->GetOrAddReal("problem","h0",h0);
   // radiation
   kappa = pin->GetOrAddReal("problem","kappa",kappa);
   kappa = pin->GetOrAddReal("radiation","kappa",kappa); // allow kappa to be specified in either problem or radiation
@@ -273,6 +277,8 @@ void MeshBlock::InitUserMeshBlockData(ParameterInput *pin) {
   // enroll function for updating the star
   // do this here because gravity driver is initialized after InitUserMeshData()
   pmy_mesh->psgrd->EnrollUpdateStarFn(GetStellarMassAndLocation);
+
+  if (NSCALARS > 0) dust_flx.NewAthenaArray(3,ncells3,ncells2,ncells1);
 
   if(NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) pnrrad->EnrollOpacityFunction(DiskOpacity);
 #ifdef RAD_ITR_DIAGNOSTICS
@@ -451,6 +457,18 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin) {
     // radiation
     if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) pnrrad->ir.ZeroClear();
   }
+
+  if (NSCALARS > 0) {
+    for (int n=0; n<NSCALARS; ++n) {
+      for (int k=ks; k<=ke; ++k) {
+        for (int j=js; j<=je; ++j) {
+          for (int i=is; i<=ie; ++i) {
+            pscalars->s(n,k,j,i) = phydro->u(IDN,k,j,i)*0.01;
+          }
+        }
+      }
+    }
+  }
 }
 
 
@@ -519,7 +537,90 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt,
           Real T_old = (cons(IEN,k,j,i) - Ek)*gm1/cons(IDN,k,j,i);
           T_old = std::max(T_old, 1.e-6); // make sure T_old is non negative
           Real T_new = std::pow(std::pow(T_old,-3) + 3.*four_sigma*gm1*kappa*dt, -1./3.);
+          if (h0>0) {
+            Real r = pmb->pcoord->x1v(i);
+            Real th = pmb->pcoord->x2v(j);
+            Real R = r*std::sin(th);
+            Real T0 = SQR(h0) * R*R/(r*r*r);
+            T_new += four_sigma*kappa*dt*(T0*T0*T0*T0)*gm1;
+          }
           cons(IEN,k,j,i) += (T_new-T_old)*cons(IDN,k,j,i)/gm1;
+        }
+      }
+    }
+  }
+
+  // passive scalar
+  const int IX=0, IY=1, IZ=2;
+  if (NSCALARS > 0) {
+    for (int n=0; n<NSCALARS; ++n) {
+      // St = 1, 0.33, 0.1 ...
+      Real Sigma_d = Md/(2.*PI*Rd*Rd)/(1-std::pow(Rd_in/Rd, 2+Sigma_slope))*(2+Sigma_slope); // Sigma at Rd
+      Real T_d = SQR(PI*G*Sigma_d*Qd/std::sqrt(G*Mtot/Rd/Rd/Rd))/gamma; // T at Rd
+      Real H_d = std::sqrt(T_d) / std::sqrt(G*Mtot/(Rd*Rd*Rd)); // computed using isothermal sound speed cs_iso = sqrt(T)
+      Real rho_mid = Sigma_d/H_d/std::sqrt(2.*PI);
+      Real rho_stop = rho_mid * std::pow(std::sqrt(0.1),n);
+      // get drift flux on interfaces
+      for (int k = pmb->ks; k <= pmb->ke; ++k) {
+        for (int j = pmb->js; j <= pmb->je; ++j) {
+          for (int i = pmb->is; i <= pmb->ie+1; ++i) {
+            Real r = pmb->pcoord->x1f(i);
+            Real rho = .5*(prim(IDN,k,j,i)+prim(IDN,k,j,i-1));
+            Real dPdx = (prim(IPR,k,j,i)-prim(IPR,k,j,i-1))/(pmb->pcoord->x1v(i)-pmb->pcoord->x1v(i-1));
+            Real stopping_time = fmin(rho_stop/rho, std::pow(r,1.5)); // cap at 1/Omega
+            Real drift_vel = dPdx*stopping_time;
+            drift_vel = drift_vel/fmax(1.,10.*std::pow(r,0.5)*fabs(drift_vel)); // cap at 0.1 vK
+            if (drift_vel>0.)
+              dust_flx(IX,k,j,i) = drift_vel*prim_scalar(n,k,j,i-1)*prim(IDN,k,j,i-1);
+            else
+              dust_flx(IX,k,j,i) = drift_vel*prim_scalar(n,k,j,i)*prim(IDN,k,j,i);
+          }
+        }
+      }
+      for (int k = pmb->ks; k <= pmb->ke; ++k) {
+        for (int j = pmb->js; j <= pmb->je+1; ++j) {
+          for (int i = pmb->is; i <= pmb->ie; ++i) {
+            Real r = pmb->pcoord->x1v(i);
+            Real rho = .5*(prim(IDN,k,j,i)+prim(IDN,k,j-1,i));
+            Real dPdx = (prim(IPR,k,j,i)-prim(IPR,k,j-1,i))/(r*(pmb->pcoord->x2v(j)-pmb->pcoord->x2v(j-1)));
+            Real stopping_time = fmin(rho_stop/rho, std::pow(r,1.5)); // cap at 1/Omega
+            Real drift_vel = dPdx*stopping_time;
+            drift_vel = drift_vel/fmax(1.,10.*std::pow(r,0.5)*fabs(drift_vel)); // cap at 0.1 vK
+            if (drift_vel>0.)
+              dust_flx(IY,k,j,i) = drift_vel*prim_scalar(n,k,j-1,i)*prim(IDN,k,j-1,i);
+            else
+              dust_flx(IY,k,j,i) = drift_vel*prim_scalar(n,k,j,i)*prim(IDN,k,j,i);
+          }
+        }
+      }
+      for (int k = pmb->ks; k <= pmb->ke+1; ++k) {
+        for (int j = pmb->js; j <= pmb->je; ++j) {
+          for (int i = pmb->is; i <= pmb->ie; ++i) {
+            Real r = pmb->pcoord->x1v(i);
+            Real rho = .5*(prim(IDN,k,j,i)+prim(IDN,k-1,j,i));
+            Real dPdx = (prim(IPR,k,j,i)-prim(IPR,k-1,j,i))/(r*std::sin(pmb->pcoord->x2v(j))*(pmb->pcoord->x3v(k)-pmb->pcoord->x3v(k-1)));
+            Real stopping_time = fmin(rho_stop/rho, std::pow(r,1.5)); // cap at 1/Omega
+            Real drift_vel = dPdx*stopping_time;
+            drift_vel = drift_vel/fmax(1.,10.*std::pow(r,0.5)*fabs(drift_vel)); // cap at 0.1 vK
+            if (drift_vel>0.)
+              dust_flx(IZ,k,j,i) = drift_vel*prim_scalar(n,k-1,j,i)*prim(IDN,k-1,j,i);
+            else
+              dust_flx(IZ,k,j,i) = drift_vel*prim_scalar(n,k,j,i)*prim(IDN,k,j,i);
+          }
+        }
+      }
+      // apply flux
+      for (int k = pmb->ks; k <= pmb->ke; ++k) {
+        for (int j = pmb->js; j <= pmb->je; ++j) {
+          for (int i = pmb->is; i <= pmb->ie; ++i) {
+            Real dV = pmb->pcoord->GetCellVolume(k,j,i);
+            cons_scalar(n,k,j,i) += dt/dV*dust_flx(IX,k,j,i)*pmb->pcoord->GetFace1Area(k,j,i);
+            cons_scalar(n,k,j,i) -= dt/dV*dust_flx(IX,k,j,i+1)*pmb->pcoord->GetFace1Area(k,j,i+1);
+            cons_scalar(n,k,j,i) += dt/dV*dust_flx(IY,k,j,i)*pmb->pcoord->GetFace2Area(k,j,i);
+            cons_scalar(n,k,j,i) -= dt/dV*dust_flx(IY,k,j+1,i)*pmb->pcoord->GetFace2Area(k,j+1,i);
+            cons_scalar(n,k,j,i) += dt/dV*dust_flx(IZ,k,j,i)*pmb->pcoord->GetFace3Area(k,j,i);
+            cons_scalar(n,k,j,i) -= dt/dV*dust_flx(IZ,k+1,j,i)*pmb->pcoord->GetFace3Area(k+1,j,i);
+          }
         }
       }
     }
@@ -648,8 +749,19 @@ void DiskOuterX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
         prim(IDN,k,j,iu+i) = prim(IDN,k,j,iu-i+1);
         prim(IVX,k,j,iu+i) = -prim(IVX,k,j,iu-i+1)*SQR(r2)/SQR(r1);
         prim(IVY,k,j,iu+i) = -prim(IVY,k,j,iu-i+1);
-        prim(IVZ,k,j,iu+i) = prim(IVZ,k,j,iu-i+1)*r2/r1;
+        prim(IVZ,k,j,iu+i) = prim(IVZ,k,j,iu-i+1)*r1/r2;
         prim(IPR,k,j,iu+i) = prim(IPR,k,j,iu-i+1);
+      }
+    }
+  }
+  if (NSCALARS > 0) {
+    for (int n=0; n<NSCALARS; ++n) {
+      for (int k=kl; k<=ku; ++k) {
+        for (int j=jl; j<=ju; ++j) {
+          for (int i=iu+1; i<=iu+ngh; ++i) {
+            pmb->pscalars->r(n,k,j,i) = 0.01;
+          }
+        }
       }
     }
   }
@@ -667,10 +779,21 @@ void DiskInnerX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
         prim(IVX,k,j,il-i) = std::min(0.,prim(IVX,k,j,il+i-1)*SQR(r2)/SQR(r1));
           // outflow with velocity cap
         prim(IVY,k,j,il-i) = prim(IVY,k,j,il+i-1);
-        prim(IVZ,k,j,il-i) = prim(IVZ,k,j,il+i-1)*r2/r1;
+        prim(IVZ,k,j,il-i) = prim(IVZ,k,j,il+i-1)*r1/r2;
           // constant rotation; this avoids extracting angular momentum from inner boundary,
           // which might excite disk eccentricity
         prim(IPR,k,j,il-i) = prim(IPR,k,j,il+i-1);
+      }
+    }
+  }
+  if (NSCALARS > 0) {
+    for (int n=0; n<NSCALARS; ++n) {
+      for (int k=kl; k<=ku; ++k) {
+        for (int j=jl; j<=ju; ++j) {
+          for (int i=il-ngh; i<=il-1; ++i) {
+            pmb->pscalars->r(n,k,j,i) = 0.01;
+          }
+        }
       }
     }
   }
@@ -688,6 +811,17 @@ void MidplaneHyd(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceF
         prim(IVY,k,ju+j,i) = -prim(IVY,k,ju-j+1,i);
         prim(IVZ,k,ju+j,i) = prim(IVZ,k,ju-j+1,i);
         prim(IPR,k,ju+j,i) = prim(IPR,k,ju-j+1,i);
+      }
+    }
+  }
+  if (NSCALARS > 0) {
+    for (int n=0; n<NSCALARS; ++n) {
+      for (int k=kl; k<=ku; ++k) {
+        for (int j=1; j<=ngh; ++j) {
+          for (int i=il; i<=iu; ++i) {
+            pmb->pscalars->r(n,k,ju+j,i) = pmb->pscalars->r(n,k,ju-j+1,i);
+          }
+        }
       }
     }
   }
