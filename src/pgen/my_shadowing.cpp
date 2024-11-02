@@ -211,7 +211,7 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt,
 // Boundary conditions
 //========================================================================================
 
-// outer: outflow
+// outer: outflow + zero v_poloidal
 // surface density will sligtly change (~10%) near boundaries.
 // I have tried many other options, none is substantially better.
 // that's because we don't physically know what to expect for disk "outside" the boundary.
@@ -222,8 +222,8 @@ void DiskOuterX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
     for (int j=jl; j<=ju; ++j) {
       for (int i=1; i<=ngh; ++i) {
         prim(IDN,k,j,iu+i) = prim(IDN,k,j,iu);
-        prim(IVX,k,j,iu+i) = prim(IVX,k,j,iu);
-        prim(IVY,k,j,iu+i) = prim(IVY,k,j,iu);
+        prim(IVX,k,j,iu+i) = 0.;//prim(IVX,k,j,iu);
+        prim(IVY,k,j,iu+i) = 0.;//prim(IVY,k,j,iu);
         prim(IVZ,k,j,iu+i) = prim(IVZ,k,j,iu);
         prim(IPR,k,j,iu+i) = prim(IPR,k,j,iu);
       }
@@ -231,7 +231,7 @@ void DiskOuterX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
   }
 }
 
-// inner: outflow
+// inner: outflow + zero v_poloidal
 // surface density will sligtly change (~10%) near boundaries.
 // I have tried many other options, none is substantially better.
 // that's because we don't physically know what to expect for disk "outside" the boundary.
@@ -242,8 +242,8 @@ void DiskInnerX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
     for (int j=jl; j<=ju; ++j) {
       for (int i=1; i<=ngh; ++i) {
         prim(IDN,k,j,il-i) = prim(IDN,k,j,il);
-        prim(IVX,k,j,il-i) = prim(IVX,k,j,il);
-        prim(IVY,k,j,il-i) = prim(IVY,k,j,il);
+        prim(IVX,k,j,il-i) = 0.;//prim(IVX,k,j,il);
+        prim(IVY,k,j,il-i) = 0.;//prim(IVY,k,j,il);
         prim(IVZ,k,j,il-i) = prim(IVZ,k,j,il);
         prim(IPR,k,j,il-i) = prim(IPR,k,j,il);
       }
