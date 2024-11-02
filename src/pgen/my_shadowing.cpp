@@ -54,7 +54,9 @@ Real T_slope = -1;
 
 // velocity damping
 
-Real beta_damp = -1; // turn on velocity damping if beta_damp>0
+Real beta_damp = -1; // turn on velocity damping if beta_damp, beta_damp_r, or beta_damp_th>0
+Real beta_damp_r = -1; // if no user input: default to beta_damp
+Real beta_damp_th = -1; // if no user input: default to beta_damp
 
 // cooling
 
@@ -110,6 +112,8 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
 
   // velocity damping
   beta_damp = pin->GetOrAddReal("problem","beta_damp",beta_damp);
+  beta_damp_r = pin->GetOrAddReal("problem","beta_damp_r",beta_damp);
+  beta_damp_th = pin->GetOrAddReal("problem","beta_damp_th",beta_damp);
 
   // cooling
   beta_cool     = pin->GetOrAddReal("problem","beta_cool",beta_cool);
@@ -190,10 +194,13 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt,
           cons(IEN,k,j,i) -= (prim(IPR,k,j,i)-prim(IDN,k,j,i)*T_floor) / gm1 * (1-std::exp(-dt*cooling_rate));
         }
         // velocity damping
-        if (beta_damp>0.) {
-          Real damping_rate = std::sqrt(GM/R/R/R)/beta_damp;
-          cons(IM1,k,j,i) *= std::exp(-dt*damping_rate);
-          cons(IM2,k,j,i) *= std::exp(-dt*damping_rate);
+        if (beta_damp_r>0.) {
+          Real damping_rate_r = std::sqrt(GM/R/R/R)/beta_damp_r;
+          cons(IM1,k,j,i) *= std::exp(-dt*damping_rate_r);
+        }
+        if (beta_damp_th>0.) {
+          Real damping_rate_th = std::sqrt(GM/R/R/R)/beta_damp_th;
+          cons(IM2,k,j,i) *= std::exp(-dt*damping_rate_th);
         }
       }
     }
@@ -204,40 +211,41 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt,
 // Boundary conditions
 //========================================================================================
 
-// outer: reflect poloidal velocity, maintain rotation
+// outer: outflow
+// surface density will sligtly change (~10%) near boundaries.
+// I have tried many other options, none is substantially better.
+// that's because we don't physically know what to expect for disk "outside" the boundary.
 void DiskOuterX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
   for (int k=kl; k<=ku; ++k) {
     for (int j=jl; j<=ju; ++j) {
       for (int i=1; i<=ngh; ++i) {
-        Real r1=pmb->pcoord->x1v(iu+i), r2=pmb->pcoord->x1v(iu-i+1);
-        prim(IDN,k,j,iu+i) = prim(IDN,k,j,iu-i+1);
-        prim(IVX,k,j,iu+i) = -prim(IVX,k,j,iu-i+1)*SQR(r2)/SQR(r1);
-        prim(IVY,k,j,iu+i) = -prim(IVY,k,j,iu-i+1);
-        prim(IVZ,k,j,iu+i) = prim(IVZ,k,j,iu-i+1)*r1/r2;
-        prim(IPR,k,j,iu+i) = prim(IPR,k,j,iu-i+1);
+        prim(IDN,k,j,iu+i) = prim(IDN,k,j,iu);
+        prim(IVX,k,j,iu+i) = prim(IVX,k,j,iu);
+        prim(IVY,k,j,iu+i) = prim(IVY,k,j,iu);
+        prim(IVZ,k,j,iu+i) = prim(IVZ,k,j,iu);
+        prim(IPR,k,j,iu+i) = prim(IPR,k,j,iu);
       }
     }
   }
 }
 
-// inner: modified outflow
+// inner: outflow
+// surface density will sligtly change (~10%) near boundaries.
+// I have tried many other options, none is substantially better.
+// that's because we don't physically know what to expect for disk "outside" the boundary.
 void DiskInnerX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
   for (int k=kl; k<=ku; ++k) {
     for (int j=jl; j<=ju; ++j) {
       for (int i=1; i<=ngh; ++i) {
-        Real r1=pmb->pcoord->x1v(il-i), r2=pmb->pcoord->x1v(il+i-1);
-        prim(IDN,k,j,il-i) = prim(IDN,k,j,il+i-1);
-        prim(IVX,k,j,il-i) = std::min(0.,prim(IVX,k,j,il+i-1)*SQR(r2)/SQR(r1));
-          // outflow with velocity cap
-        prim(IVY,k,j,il-i) = prim(IVY,k,j,il+i-1);
-        prim(IVZ,k,j,il-i) = prim(IVZ,k,j,il+i-1)*r1/r2;
-          // constant rotation; this avoids extracting angular momentum from inner boundary,
-          // which might excite disk eccentricity
-        prim(IPR,k,j,il-i) = prim(IPR,k,j,il+i-1);
+        prim(IDN,k,j,il-i) = prim(IDN,k,j,il);
+        prim(IVX,k,j,il-i) = prim(IVX,k,j,il);
+        prim(IVY,k,j,il-i) = prim(IVY,k,j,il);
+        prim(IVZ,k,j,il-i) = prim(IVZ,k,j,il);
+        prim(IPR,k,j,il-i) = prim(IPR,k,j,il);
       }
     }
   }
