@@ -1,0 +1,70 @@
+<comment>
+problem   = self-shadowed disk
+reference = 
+configure = --coord=spherical_polar --prob=my_shadowing -hdf5 -mpi
+
+<job>
+problem_id = disk
+
+<output1>
+file_type  = hdf5        # Binary data dump
+variable   = prim       # variables to be output
+dt         = 10          # time increment between outputs
+
+<time>
+cfl_number = 0.3
+nlim       = -1
+tlim       = 1000
+integrator  = vl2
+xorder      = 2
+ncycle_out  = 10
+
+<mesh>
+nx1        = 128
+x1min      = 1
+x1max      = 20
+x1rat      = 1.0236801848849415
+ix1_bc     = user
+ox1_bc     = user
+
+nx2        = 80
+x2min      = 0.0
+x2max      = 1.5707963267948966
+x2rat      = -1 # user-defined mesh generator
+nth_lo     = 16
+nth_hi     = 64
+h_hi       = 0.5
+dth_pole   = 0.1
+ix2_bc     = polar_wedge
+ox2_bc     = user
+
+nx3        = 1
+x3min      = 0.
+x3max      = 6.283185307179586
+ix3_bc     = periodic
+ox3_bc     = periodic
+
+<meshblock>
+nx1        = 32
+nx2        = 40
+nx3        = 1
+
+<hydro>
+gamma           = 1.666666666667 # gamma = C_p/C_v
+dfloor = 1e-10
+
+<problem>
+GM = 1
+
+R_in = 0
+R_out = 20
+Sigma_0 = 1
+Sigma_slope = -1
+T_0 = 0.01
+T_slope = -1
+
+beta_damp = 1
+
+beta_cool = 1
+T_floor_0 = 0.0025;
+T_floor_slope = -1;
