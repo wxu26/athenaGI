@@ -1,0 +1,90 @@
+<comment>
+problem   = self-shadowed disk
+reference = 
+configure = --coord=spherical_polar --prob=my_shadowing -implicit_radiation -hdf5 -mpi
+
+<job>
+problem_id = disk
+
+<output1>
+file_type  = hdf5        # Binary data dump
+variable   = prim       # variables to be output
+dt         = 1          # time increment between outputs
+#dcycle = 10
+
+<time>
+cfl_number = 0.3
+nlim       = -1
+tlim       = 100
+integrator  = vl2
+xorder      = 2
+ncycle_out  = 5
+
+<mesh>
+nx1        = 128
+x1min      = 1
+x1max      = 20
+x1rat      = 1.0236801848849415
+ix1_bc     = user
+ox1_bc     = user
+
+nx2        = 80
+x2min      = 0.0
+x2max      = 1.5707963267948966
+x2rat      = -1 # user-defined mesh generator
+nth_lo     = 16
+nth_hi     = 64
+h_hi       = 0.5
+dth_pole   = 0.1
+ix2_bc     = polar_wedge
+ox2_bc     = user
+
+nx3        = 1
+x3min      = 0.
+x3max      = 6.283185307179586
+ix3_bc     = periodic
+ox3_bc     = periodic
+
+<meshblock>
+nx1        = 128
+nx2        = 16
+nx3        = 1
+
+<hydro>
+gamma           = 1.666666666667 # gamma = C_p/C_v
+dfloor = 1e-20
+pfloor = 1e-24
+#fofc = 1
+
+<radiation>
+nmu            = 4      # default angular system with 80 angles per cell in 3D
+n_frequency    = 1      # two frequency groups
+unit             = 1        # adopt the units in the input file
+T_unit           = 250422.328792281
+density_unit     = 5.939223576917516e-07
+length_unit      = 14959787070000.0
+molecular_weight = 2.33     # mean molecular weight
+nlimit           = 50       # maximum number of iterations to try
+error_limit      = 1.e-6    # tolerance level of iteration
+
+<problem>
+GM = 1
+
+R_in = 0
+R_out = 20
+Sigma_0 = 1.1254984823685956e-05 # 100 g cm-2
+Sigma_slope = -1
+T_0 = 0.001
+T_slope = -1
+
+beta_damp = 1
+
+#beta_cool = 0.2
+#T_floor_0 = 0.;
+#T_floor_0 = 0.0025
+#T_floor_slope = -0.25
+
+L_star = 1.0899021036681024e-06 # 1 Lsun
+kappa_star = 355398080.28723925 # 40 cm^2/g
+
+kappa_therm = 8884952.007180981 # 1 cm^2/g
