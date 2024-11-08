@@ -197,10 +197,14 @@ void Hydro::FirstOrderFluxCorrection(Real delta, Real gam0, Real gam1, Real beta
   pmb->peos->fofc_bvar.SetBoundaries();
   pmb->peos->fofc_bvar.ClearBoundary(BoundaryCommSubset::all);
 
+  int is_3d = (ke>ks);
+  int is_2d = (je>js);
+
   // test one extra cell in ghost zone to make sure we get the right boundaries
   // utest_(IEN) must be e_int + e_k excluding e_mag even if MHD
-  pmb->peos->ConservedToPrimitiveTest(utest_, bcctest_, is-1, ie+1, js-1, je+1, ks-1, ke+1);
+  pmb->peos->ConservedToPrimitiveTest(utest_, bcctest_, is-1, ie+1, js-is_2d, je+is_2d, ks-is_3d, ke+is_3d);
 
+  /*
   // for any bdry where active cell is not adjacent to another block, set fofc to false
   if (pmb->pbval->block_bcs[BoundaryFace::inner_x1]!=BoundaryFlag::block &&
       pmb->pbval->block_bcs[BoundaryFace::inner_x1]!=BoundaryFlag::periodic &&
@@ -231,12 +235,12 @@ void Hydro::FirstOrderFluxCorrection(Real delta, Real gam0, Real gam1, Real beta
         pmb->peos->fofc_(k,j,i) = false;
       }
     }
-  }
+  }*/
 
   // now replace fluxes with first-order fluxes
   // go one extra cell to make sure boundary is consistent
-  for (int k=ks-1; k<=ke+1; ++k) {
-    for (int j=js-1; j<=je+1; ++j) {
+  for (int k=ks-is_3d; k<=ke+is_3d; ++k) {
+    for (int j=js-is_2d; j<=je+is_2d; ++j) {
 #pragma omp simd
       for (int i=is-1; i<=ie+1; ++i) {
         if (pmb->peos->fofc_(k,j,i)) {
