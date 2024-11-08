@@ -64,6 +64,15 @@ Real beta_cool = -1; // turn on beta cooling if beta_cool>0
 Real T_floor_0 = 0; // cool towards this floor
 Real T_floor_slope = 0;
 
+// stellar heating
+
+Real L_star = -1; // turn on stellar heating if L_star>0
+Real kappa_star = 0; // opacity for stellar irradiation
+
+// dust cooling at constant opacity
+
+Real kappa_therm = 0; // >0: use constant opacity; <0: use more complex opacity (not defined yet)
+
 //========================================================================================
 // Forward declarations
 //========================================================================================
@@ -73,15 +82,30 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt,
               const AthenaArray<Real> &bcc, AthenaArray<Real> &cons,
               AthenaArray<Real> &cons_scalar);
 
+void DiskOpacity(MeshBlock *pmb, AthenaArray<Real> &prim);
+
 void DiskInnerX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh);
 void DiskOuterX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh);
+void RadInnerX1(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
+                const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
+                Real time, Real dt,
+                int is, int ie, int js, int je, int ks, int ke, int ngh);
+void RadOuterX1(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
+                const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
+                Real time, Real dt,
+                int is, int ie, int js, int je, int ks, int ke, int ngh);
 void MidplaneHyd(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh);
+void MidplaneRad(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
+                 const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
+                 Real time, Real dt,
+                 int is, int ie, int js, int je, int ks, int ke, int ngh);
+
 Real MeshGen(Real x, RegionSize rs);
 
 //========================================================================================
@@ -120,18 +144,37 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   T_floor_0     = pin->GetOrAddReal("problem","T_floor_0",T_floor_0);
   T_floor_slope = pin->GetOrAddReal("problem","T_floor_slope",T_floor_slope);
 
+  // stellar heating
+  L_star = pin->GetOrAddReal("problem","L_star",L_star);
+  kappa_star = pin->GetOrAddReal("problem","kappa_star",kappa_star);
+
+  // dust cooling at constant opacity
+  kappa_therm = pin->GetOrAddReal("problem","kappa_therm",kappa_therm);
+
   // source term
   EnrollUserExplicitSourceFunction(MySource);
   // boundary conitions
   if (mesh_bcs[BoundaryFace::inner_x1] == GetBoundaryFlag("user")) {
     EnrollUserBoundaryFunction(BoundaryFace::inner_x1, DiskInnerX1);
+    if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) EnrollUserRadBoundaryFunction(BoundaryFace::inner_x1, RadInnerX1);
   }
   if (mesh_bcs[BoundaryFace::outer_x1] == GetBoundaryFlag("user")) {
     EnrollUserBoundaryFunction(BoundaryFace::outer_x1, DiskOuterX1);
+    if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) EnrollUserRadBoundaryFunction(BoundaryFace::outer_x1, RadOuterX1);
   }
   if (mesh_bcs[BoundaryFace::outer_x2] == GetBoundaryFlag("user")) {
     EnrollUserBoundaryFunction(BoundaryFace::outer_x2, MidplaneHyd);
+    if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) EnrollUserRadBoundaryFunction(BoundaryFace::outer_x2, MidplaneRad);
   }
+}
+
+void MeshBlock::InitUserMeshBlockData(ParameterInput *pin) {
+  AllocateRealUserMeshBlockDataField(1);
+  ruser_meshblock_data[0].NewAthenaArray(ncells3, ncells2, ncells1); // face optical depth
+  if(NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) pnrrad->EnrollOpacityFunction(DiskOpacity);
+#ifdef SAVE_HEATING_RATE
+  AllocateUserOutputVariables(1); // heating rate
+#endif
 }
 
 //========================================================================================
@@ -143,6 +186,7 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin) {
   // Sigma = power law between R_in and R_out, zero otherwise
   const Real dfloor = peos->GetDensityFloor();
   const Real gamma = peos->GetGamma();
+  const Real R_in_bdry = pin->GetReal("mesh","x1min");
   for (int k=ks; k<=ke; ++k) {
     for (int j=js; j<=je; ++j) {
       for (int i=is; i<=ie; ++i) {
@@ -156,7 +200,7 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin) {
         Real Sigma = Sigma_0 * std::pow(R, Sigma_slope);
         if (R<R_in || R>R_out) Sigma = 0;
 
-        Real T = T_0 * std::pow(R, T_slope);
+        Real T = T_0 * std::pow(std::max(R,R_in_bdry), T_slope);
         Real H = std::sqrt(T) / std::sqrt(GM/(R*R*R)); // computed using isothermal sound speed cs_iso = sqrt(T)
         Real rho_mid = Sigma/H/std::sqrt(2.*PI);
         phydro->u(IDN,k,j,i) = std::max(dfloor, rho_mid * std::exp(-.5*SQR(z/H))); // just a hard-coded density floor
@@ -170,6 +214,8 @@ void MeshBlock::ProblemGenerator(ParameterInput *pin) {
       }
     }
   }
+  // irradiation
+  if (NR_RADIATION_ENABLED||IM_RADIATION_ENABLED) pnrrad->ir.ZeroClear();
 }
 
 //========================================================================================
@@ -180,27 +226,88 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt,
               const AthenaArray<Real> &prim, const AthenaArray<Real> &prim_scalar,
               const AthenaArray<Real> &bcc, AthenaArray<Real> &cons,
               AthenaArray<Real> &cons_scalar) {
+  // estimate optical depth if we have stellar irradiation
+  AthenaArray<Real> & tauf = pmb->ruser_meshblock_data[0];
+  if (L_star>0.) {
+    // TODO: multi-meshblock support using remapcolumns
+    // for now let's assume one mb in radial direction
+    for (int k = pmb->ks; k <= pmb->ke; ++k) {
+      for (int j = pmb->js; j <= pmb->je; ++j) {
+        tauf(k,j,pmb->is) = 0.;
+        for (int i = pmb->is; i <= pmb->ie; ++i) {
+          tauf(k,j,i+1) = tauf(k,j,i) + pmb->pcoord->dx1f(i)*prim(IDN,k,j,i)*kappa_star;
+        }
+      }
+    }
+  }
+
+  // apply source
   const Real gm1 = pmb->peos->GetGamma()-1.;
+  const Real R_in_bdry = pmb->pmy_mesh->mesh_size.x1min;
   for (int k = pmb->ks; k <= pmb->ke; ++k) {
     for (int j = pmb->js; j <= pmb->je; ++j) {
       for (int i = pmb->is; i <= pmb->ie; ++i) {
         Real r = pmb->pcoord->x1v(i);
         Real th = pmb->pcoord->x2v(j);
         Real R = r*std::sin(th);
-        // beta cooling
-        if (beta_cool>0.) {
-          Real cooling_rate = std::sqrt(GM/R/R/R)/beta_cool;
-          Real T_floor = T_floor_0 * std::pow(R, T_floor_slope);
-          cons(IEN,k,j,i) -= (prim(IPR,k,j,i)-prim(IDN,k,j,i)*T_floor) / gm1 * (1-std::exp(-dt*cooling_rate));
-        }
-        // velocity damping
+        // velocity damping (conserve internal energy)
         if (beta_damp_r>0.) {
-          Real damping_rate_r = std::sqrt(GM/R/R/R)/beta_damp_r;
+          Real damping_rate_r = std::sqrt(GM/r/r/r)/beta_damp_r;
+          Real Ek = .5*SQR(cons(IM1,k,j,i))/cons(IDN,k,j,i);
           cons(IM1,k,j,i) *= std::exp(-dt*damping_rate_r);
+          cons(IEN,k,j,i) -= Ek - .5*SQR(cons(IM1,k,j,i))/cons(IDN,k,j,i);
         }
         if (beta_damp_th>0.) {
-          Real damping_rate_th = std::sqrt(GM/R/R/R)/beta_damp_th;
+          Real damping_rate_th = std::sqrt(GM/r/r/r)/beta_damp_th;
+          Real Ek = .5*SQR(cons(IM2,k,j,i))/cons(IDN,k,j,i);
           cons(IM2,k,j,i) *= std::exp(-dt*damping_rate_th);
+          cons(IEN,k,j,i) -= Ek - .5*SQR(cons(IM2,k,j,i))/cons(IDN,k,j,i);
+        }
+        // beta cooling
+        if (beta_cool>0.) {
+          Real cooling_rate = std::sqrt(GM/r/r/r)/beta_cool;
+          Real T_floor = T_floor_0 * std::pow(std::max(R,R_in_bdry), T_floor_slope);
+          cons(IEN,k,j,i) -= (prim(IPR,k,j,i)-prim(IDN,k,j,i)*T_floor) / gm1 * (1-std::exp(-dt*cooling_rate));
+        }
+        // stellar heating
+        if (L_star>0.) {
+          Real rl = pmb->pcoord->x1f(i);
+          Real rr = pmb->pcoord->x1f(i+1);
+          cons(IEN,k,j,i) += dt*L_star/(4./3.*PI*(rr*rr*rr-rl*rl*rl))
+                            *std::exp(-tauf(k,j,i))*(1-std::exp(tauf(k,j,i)-tauf(k,j,i+1)));
+        }
+      }
+    }
+  }
+}
+
+//========================================================================================
+// Opacity function: constant opacity
+//========================================================================================
+
+void DiskOpacity(MeshBlock *pmb, AthenaArray<Real> &prim) {
+  NRRadiation *pnrrad = pmb->pnrrad;
+  int il = pmb->is; int jl = pmb->js; int kl = pmb->ks;
+  int iu = pmb->ie; int ju = pmb->je; int ku = pmb->ke;
+  il -= NGHOST;
+  iu += NGHOST;
+  if(ju > jl){
+    jl -= NGHOST;
+    ju += NGHOST;
+  }
+  if(ku > kl){
+    kl -= NGHOST;
+    ku += NGHOST;
+  }
+  for (int k=kl; k<=ku; ++k) {
+    for (int j=jl; j<=ju; ++j) {
+      for (int i=il; i<=iu; ++i) {
+        Real sigma = prim(IDN,k,j,i) * kappa_therm;
+        for (int ifr=0; ifr<pnrrad->nfreq; ++ifr){
+          pnrrad->sigma_s(k,j,i,ifr) = 0.0;
+          pnrrad->sigma_a(k,j,i,ifr) = sigma;
+          pnrrad->sigma_pe(k,j,i,ifr) = sigma;
+          pnrrad->sigma_p(k,j,i,ifr) = sigma;
         }
       }
     }
@@ -263,6 +370,86 @@ void MidplaneHyd(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceF
         prim(IVY,k,ju+j,i) = -prim(IVY,k,ju-j+1,i);
         prim(IVZ,k,ju+j,i) = prim(IVZ,k,ju-j+1,i);
         prim(IPR,k,ju+j,i) = prim(IPR,k,ju-j+1,i);
+      }
+    }
+  }
+}
+
+// r boundary: vacuum
+void RadInnerX1(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
+                const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
+                Real time, Real dt,
+                int is, int ie, int js, int je, int ks, int ke, int ngh) {
+  for (int k=ks; k<=ke; ++k) {
+    for (int j=js; j<=je; ++j) {
+      for (int i=1; i<=ngh; ++i) {
+        for(int ifr=0; ifr<pnrrad->nfreq; ++ifr) {
+          for(int n=0; n<pnrrad->nang; ++n) {
+            Real mu = pnrrad->mu(0,k,j,is-i,ifr*pnrrad->nang+n);
+            if (mu<0.) // flowing out - continuous
+              ir(k,j,is-i,ifr*pnrrad->nang+n) = ir(k,j,is-i+1,ifr*pnrrad->nang+n);
+            else // flowing in - zero
+              ir(k,j,is-i,ifr*pnrrad->nang+n) = 0.0;
+          }
+        }
+      }
+    }
+  }
+}
+void RadOuterX1(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
+                const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
+                Real time, Real dt,
+                int is, int ie, int js, int je, int ks, int ke, int ngh) {
+  for (int k=ks; k<=ke; ++k) {
+    for (int j=js; j<=je; ++j) {
+      for (int i=1; i<=ngh; ++i) {
+        for(int ifr=0; ifr<pnrrad->nfreq; ++ifr) {
+          for(int n=0; n<pnrrad->nang; ++n) {
+            Real mu = pnrrad->mu(0,k,j,ie+i,ifr*pnrrad->nang+n);
+            if (mu>0.) // flowing out - continuous
+              ir(k,j,ie+i,ifr*pnrrad->nang+n) = ir(k,j,ie+i-1,ifr*pnrrad->nang+n);
+            else // flowing in - zero
+              ir(k,j,ie+i,ifr*pnrrad->nang+n) = 0.0;
+          }
+        }
+      }
+    }
+  }
+}
+
+// midplane: reflecting
+// when I did my GI project there was no working midplane reflecting bc
+// not sure if that's still the case now
+void MyCopyIntensity(Real *iri, Real *iro, int li, int lo, int n_ang) {
+  // here ir is only intensity for each cell and each frequency band
+  for (int n=0; n<n_ang; ++n) {
+    int angi = li * n_ang + n;
+    int ango = lo * n_ang + n;
+    iro[angi] = iri[ango];
+    iro[ango] = iri[angi];
+  }
+}
+void MidplaneRad(MeshBlock *pmb, Coordinates *pco, NRRadiation *pnrrad,
+                 const AthenaArray<Real> &w, FaceField &b, AthenaArray<Real> &ir,
+                 Real time, Real dt,
+                 int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
+  int &noct = pnrrad->noct;
+  int n_ang = pnrrad->nang/noct; // angles per octant
+  int &nfreq = pnrrad->nfreq; // number of frequency bands
+
+  for (int k=kl; k<=ku; ++k) {
+    for (int j=1; j<=ngh; ++j) {
+      for (int i=il; i<=iu; ++i) {
+        for (int ifr=0; ifr<nfreq; ++ifr) {
+          Real *iri = &ir(k,ju-j+1,i,ifr*pnrrad->nang);
+          Real *iro = &ir(k,ju+j,i, ifr*pnrrad->nang);
+          MyCopyIntensity(iri, iro, 0, 2, n_ang);
+          MyCopyIntensity(iri, iro, 1, 3, n_ang);
+          if (noct > 4) {
+            MyCopyIntensity(iri, iro, 4, 6, n_ang);
+            MyCopyIntensity(iri, iro, 5, 7, n_ang);
+          }
+        }
       }
     }
   }
