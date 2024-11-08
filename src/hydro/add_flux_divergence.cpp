@@ -17,6 +17,7 @@
 #include "../athena.hpp"
 #include "../athena_arrays.hpp"
 #include "../coordinates/coordinates.hpp"
+#include "../eos/eos.hpp"
 #include "../mesh/mesh.hpp"
 #include "hydro.hpp"
 
@@ -46,7 +47,7 @@ void Hydro::AddFluxDivergence(const Real wght, AthenaArray<Real> &u_out) {
   AthenaArray<Real> &x1area = x1face_area_, &x2area = x2face_area_,
                  &x2area_p1 = x2face_area_p1_, &x3area = x3face_area_,
                  &x3area_p1 = x3face_area_p1_, &vol = cell_volume_, &dflx = dflx_;
-
+  const Real dfloor = pmy_block->peos->GetDensityFloor();
   for (int k=ks; k<=ke; ++k) {
     for (int j=js; j<=je; ++j) {
       // calculate x1-flux divergence
@@ -84,12 +85,32 @@ void Hydro::AddFluxDivergence(const Real wght, AthenaArray<Real> &u_out) {
 
       // update conserved variables
       pmb->pcoord->CellVolume(k, j, is, ie, vol);
+#ifdef HYDRO_HEATING_OFF
+      // WX: turn off hydro heating by forcing temperature remain the same
+      for (int i=is; i<=ie; ++i) {
+        Real U = u_out(IEN,k,j,i) - .5*(SQR(u_out(IM1,k,j,i))+SQR(u_out(IM2,k,j,i))+SQR(u_out(IM3,k,j,i)))/u_out(IDN,k,j,i);
+        // apply a temperature floor of 0; I'm not too sure is this is ever necessary
+        // meanwhile, no need to apply density floor to input because other physics (heating by source/rad) 
+        // does not change density
+        if (U<0.) U=0.;
+        Real U_over_rho = U/u_out(IDN,k,j,i);
+        for (int n=0; n<NHYDRO; ++n) {
+          u_out(n,k,j,i) -= wght*dflx(n,i)/vol(i);
+        }
+        // apply density floor
+        if (u_out(IDN,k,j,i) < dfloor) u_out(IDN,k,j,i) = dfloor;
+        // update energy
+        u_out(IEN,k,j,i) = u_out(IDN,k,j,i)*U_over_rho 
+                         + .5*(SQR(u_out(IM1,k,j,i))+SQR(u_out(IM2,k,j,i))+SQR(u_out(IM3,k,j,i)))/u_out(IDN,k,j,i);
+      }
+#else
       for (int n=0; n<NHYDRO; ++n) {
 #pragma omp simd
         for (int i=is; i<=ie; ++i) {
           u_out(n,k,j,i) -= wght*dflx(n,i)/vol(i);
         }
       }
+#endif
     }
   }
   return;
