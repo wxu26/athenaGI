@@ -19,6 +19,9 @@
 // whether to save the heating rate
 #define SAVE_HEATING_RATE
 // the two options above are incompatible with each other
+// whether to turn off hydro heating/cooling
+// this only works for hydro (no mhd) with non-barotropic EoS 
+#define HYDRO_HEATING_OFF
 
 // configure.py dict(definitions) string values:
 
