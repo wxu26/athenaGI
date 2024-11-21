@@ -539,9 +539,10 @@ void RemapColumns::ApplyPhysicalBoundaries(){
   // user is treated as outflow here
   // block and polar have been handeled by boundary communications
   Real time=pmb->pmy_mesh->time, dt=pmb->pmy_mesh->dt;
-  Real il=pmb->is, iu=pmb->ie, jl=pmb->js, ju=pmb->je, kl=pmb->ks, ku=pmb->ke;
-  if (N[1]>1) {il-=NGHOST; iu+=NGHOST;}
-  if (N[2]>1) {jl-=NGHOST; ju+=NGHOST;}
+  int il=pmb->is, iu=pmb->ie, jl=pmb->js, ju=pmb->je, kl=pmb->ks, ku=pmb->ke;
+  il-=NGHOST; iu+=NGHOST;
+  if (N[1]>1) {jl-=NGHOST; ju+=NGHOST;}
+  if (N[2]>1) {kl-=NGHOST; ku+=NGHOST;}
   // x[0]
   switch(pmb->pbval->block_bcs[BoundaryFace::inner_x1]) {
     case BoundaryFlag::reflect:
