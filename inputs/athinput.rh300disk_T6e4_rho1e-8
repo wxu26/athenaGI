@@ -1,0 +1,129 @@
+<comment>
+problem   = Radiation beam test
+reference = 
+configure = --prob=globalstar
+
+<job>
+problem_id = rh300disk_pole        # problem ID: basename of output filenames
+
+<output1>
+file_type  = hdf5       # Binary data dump
+dt         = 1.0       # time increment between outputs
+variable   = prim
+xdmf       = 1		
+ghost_zones= false         # include ghost zones
+
+<output2>
+file_type  = hst       # Binary data dump
+dt         = 0.1       # time increment between outputs
+
+<output3>
+file_type  = rst       # Binary data dump
+dt         = 10.0       # time increment between outputs
+
+
+<time>
+cfl_number = 0.3       # The Courant, Friedrichs, & Lewy (CFL) Number
+nlim       = -1    # cycle limit
+tlim       = 600.0000      # time limit
+rad_xorder = 2  
+xorder     = 2
+
+<mesh>
+nx1        = 80        # Number of zones in X1-direction
+x1min      = 24.65     # minimum value of X1
+x1max      = 1500.0    # maximum value of X1
+ix1_bc     = user  # inner-X1 boundary flag
+ox1_bc     = user  # inner-X1 boundary flag
+x1rat      = 1.0526971064552535
+
+
+nx2        = 80       # Number of zones in X2-direction
+x2min      = 0.0      # minimum value of X2
+x2max      = 1.570796326794896 #3.1415926535897932 #1.570796326794896 #2.9415926535897931e+00       # maximum value of X2
+ix2_bc     = reflecting  # inner-X2 boundary flag
+ox2_bc     = reflecting  # inner-X2 boundary flag
+
+
+nx3        = 160       # Number of zones in X3-direction
+x3min      = 0.0      # minimum value of X3
+x3max      = 6.283185307179586  # maximum value of X3      
+ix3_bc     = periodic  # inner-X3 boundary flag
+ox3_bc     = periodic  # inner-X3 boundary flag
+
+refinement = none
+#refinement  = adaptive # AMR
+#derefine_count = 5     # allow derefinement after 5 steps
+numlevel    = 2        # number of AMR levels
+#derefine_count = 5     # allow derefinement after 5 steps
+
+<meshblock>
+nx1         = 20
+nx2         = 20
+nx3         = 20
+
+#<refinement1>
+#x1min       = 24.65
+#x1max       = 855
+#x2min       = 0.5 #1.420796326794897
+#x2max       = 1.570796326794895
+#x3min       = 0.0
+#x3max       = 6.283185307179586e+00
+#level       = 1
+
+#<refinement2>
+#x1min       = 24.65
+#x1max       = 50
+#x2min       = 0.2 #1.420796326794898
+#x2max       = 2.941592653589793e+00    #1.720796326794895
+#x3min       = 0.0
+#x3max       = 6.283185307179586e+00
+#level       = 2
+
+#<refinement3>
+#x1min       = 18
+#x1max       = 20
+#x2min       = 1.420796326794897
+#x2max       = 1.720796326794896
+#x3min       = 0.0
+#x3max       = 0.3
+#level       = 3
+
+
+<hydro>
+gamma           = 1.6666666666667       # gamma = C_p/C_v
+dfloor          = 1.e-5
+pfloor          = 1.e-6
+
+<problem>
+
+GM		= 6250.164898772463
+omegarot	= 0.002404974524369574
+r0		= 133716.75053918044
+mass0		= 13828606007.953007
+rho0 		= 1.e-1
+p0_over_r0      = 6.e-1
+
+
+<radiation>
+nmu         = 4
+unit        = 1
+T_unit      = 100000.0
+density_unit= 1.e-7
+length_unit = 6.955e10
+molecular_weight = 0.6027670325650469
+crat	    = 8071.93209462098 
+prat	    = 0.54862190836051865
+Compton     = 0
+tfloor      = 0.1
+planck       = 1
+reduced_factor = 0.1
+angle_flag   = 1
+nzeta        = 5
+npsi         = 4
+error_limit  = 1.e-6
+taucell      = 4
+cfl_rad      = 0.3
+nlimit       = 100
+
+

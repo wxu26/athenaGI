@@ -160,6 +160,8 @@ void SphGravity::Solve(){
   Remap(3, 0, scratch, data);
   // store phi and apply bc (now we only do radial physical bc)
   StorePhi(data);
+
+  //pmb->pgrav->phi(k,j,i) += 1; 
   return;
 }
 
@@ -233,7 +235,19 @@ void SphGravity::LoadSource(Real * src) {
       for (int i=pmb->is;i<=pmb->ie;i++) {
         int ind = (k-pmb->ks)*pmb->block_size.nx2*pmb->block_size.nx1 
                 + (j-pmb->js)*pmb->block_size.nx1 + (i-pmb->is);
-        src[ind] = pmb->phydro->u(IDN,k,j,i) * four_pi_G * SQR(pmb->pcoord->x1v(i)) / N[2];
+          Real x1 = pmb->pcoord->x1v(i);
+          Real x2 = pmb->pcoord->x2v(j);
+          Real x3 = pmb->pcoord->x3v(k); 
+          Real den0 = 1e-1;
+          Real omegarot        = 0.0024205351072015845;
+          Real p0_over_r0	     = 6.e-1;
+          Real midprat      =  1.18502332205872;
+          Real z = fabs(x1*cos(x2));
+          Real zfactor = (1-SQR(z)/8/p0_over_r0/(1 + midprat/3)*omegarot*omegarot);
+          Real den = den0*zfactor*zfactor*zfactor; //stratified disk profile
+          Real rhofloor = 1.e-8;
+          if (den < rhofloor) {den = rhofloor;}
+          src[ind] = pmb->phydro->u(IDN,k,j,i) * four_pi_G * SQR(pmb->pcoord->x1v(i)) / N[2];
       }
     }
   }
