@@ -1,0 +1,27 @@
+  Your Athena++ distribution has now been configured with the following options: 
+  Problem generator:            rsg_star_tidal_generaleos_sg
+  Coordinate system:            spherical_polar
+  Equation of state:            general/ideal
+  Riemann solver:               hllc
+  Magnetic fields:              OFF
+  Number of scalars:            0
+  Special relativity:           OFF
+  General relativity:           OFF
+  Radiative Transfer:           OFF
+  Implicit Radiation:           OFF
+  Cosmic Ray Transport:         OFF
+  Frame transformations:        OFF
+  Self-Gravity:                 spherical harmonics
+  Super-Time-Stepping:          OFF
+  Debug flags:                  OFF
+  Code coverage flags:          OFF
+  Linker flags:                  -L/usr/local/hdf5/gcc/openmpi-4.1.0/1.10.6/lib64  -lfftw3 -lhdf5
+  Floating-point precision:     double
+  Number of ghost cells:        2
+  MPI parallelism:              ON
+  OpenMP parallelism:           OFF
+  FFT:                          ON
+  HDF5 output:                  ON
+  HDF5 precision:               single
+  Compiler:                     g++
+  Compilation command:          mpicxx  -O3 -std=c++11
