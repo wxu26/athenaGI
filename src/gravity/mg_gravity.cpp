@@ -204,6 +204,22 @@ void MGGravityDriver::Solve(int stage) {
   if (vmg_[0]->pmy_block_->pgrav->fill_ghost)
     gtlist_->DoTaskListOneStage(pmy_mesh_, stage);
 
+  // WX: hard code a point mass...
+  const Real GM = 1.;
+  const Real r_acc = 0.15;
+  for (auto itr = vmg_.begin(); itr < vmg_.end(); itr++) {
+    Multigrid *pmg = *itr;
+    MeshBlock *pmb = pmg->pmy_block_;
+    for (int k = pmb->ks-NGHOST; k <= pmb->ke+NGHOST; ++k) {
+      for (int j = pmb->js-NGHOST; j <= pmb->je+NGHOST; ++j) {
+        for (int i = pmb->is-NGHOST; i <= pmb->ie+NGHOST; ++i) {
+          Real r = std::sqrt(SQR(pmb->pcoord->x1v(i))+SQR(pmb->pcoord->x2v(j))+SQR(pmb->pcoord->x3v(k)));
+          pmb->pgrav->phi(k,j,i) += -GM/std::max(r,r_acc);
+        }
+      }
+    }
+  }
+
   return;
 }
 
