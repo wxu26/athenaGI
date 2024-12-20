@@ -186,15 +186,15 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   }
 
   // hst outputs
-  AllocateUserHistoryOutput(4); // rho_max, rho_rel_max, T_max, v_max
+  AllocateUserHistoryOutput(7); // rho_max, rho_rel_max, T_max, v_max, Mx, My, Mz
   EnrollUserHistoryOutput(0, MyHst, "rho_max", UserHistoryOperation::max);
   EnrollUserHistoryOutput(1, MyHst, "rho_rel_max", UserHistoryOperation::max);
   EnrollUserHistoryOutput(2, MyHst, "T_max", UserHistoryOperation::max);
   EnrollUserHistoryOutput(3, MyHst, "v_max", UserHistoryOperation::max);
     // rho_rel is relative to (extrapolated) initial midplane density
-
-  AllocateRealUserMeshDataField(1);
-  ruser_mesh_data[0].NewAthenaArray(4); // stellar properties
+  EnrollUserHistoryOutput(4, MyHst, "Mx");
+  EnrollUserHistoryOutput(5, MyHst, "My");
+  EnrollUserHistoryOutput(6, MyHst, "Mz");
 }
 
 void MeshBlock::InitUserMeshBlockData(ParameterInput *pin) {
@@ -396,9 +396,10 @@ Real MeshGen(Real x, RegionSize rs) {
 // History output
 //========================================================================================
 Real MyHst(MeshBlock *pmb, int iout){
-  // max density, relative density, temperature, or velocity
+  // 0-3: max density, relative density, temperature, and velocity
+  // 4-6: M*x, M*y, M*z
   int is=pmb->is, ie=pmb->ie, js=pmb->js, je=pmb->je, ks=pmb->ks, ke=pmb->ke;
-  Real y_max = 0.;
+  Real y_max = 0., y_sum = 0.;
   const Real gamma = pmb->peos->GetGamma();
   for(int k=ks; k<=ke; k++) {
     for(int j=js; j<=je; j++) {
@@ -422,11 +423,42 @@ Real MyHst(MeshBlock *pmb, int iout){
         else if (iout==3) {
           y = std::sqrt(SQR(pmb->phydro->w(IVX,k,j,i))+SQR(pmb->phydro->w(IVY,k,j,i))+SQR(pmb->phydro->w(IVZ,k,j,i)));
         }
+        else if (iout==4) {
+          Real d; // x
+          if (is_cart) {
+            d = pmb->pcoord->x1v(i);
+          } else {
+            d = pmb->pcoord->x1v(i) * std::sin(pmb->pcoord->x2v(j)) * std::cos(pmb->pcoord->x3v(k));
+          }
+          y = pmb->pcoord->GetCellVolume(k,j,i)*d*pmb->phydro->w(IDN,k,j,i);
+        }
+        else if (iout==5) {
+          Real d; // y
+          if (is_cart) {
+            d = pmb->pcoord->x2v(j);
+          } else {
+            d = pmb->pcoord->x1v(i) * std::sin(pmb->pcoord->x2v(j)) * std::sin(pmb->pcoord->x3v(k));
+          }
+          y = pmb->pcoord->GetCellVolume(k,j,i)*d*pmb->phydro->w(IDN,k,j,i);
+        }
+        else if (iout==6) {
+          Real d; // z
+          if (is_cart) {
+            d = pmb->pcoord->x3v(k);
+          } else {
+            d = pmb->pcoord->x1v(i) * std::cos(pmb->pcoord->x2v(j));
+          }
+          y = pmb->pcoord->GetCellVolume(k,j,i)*d*pmb->phydro->w(IDN,k,j,i);
+        }
         if (y>y_max) y_max = y;
+        y_sum += y;
       }
     }
   }
-  return y_max;
+  if (iout<4)
+    return y_max;
+  else
+    return y_sum;
 }
 
 
@@ -475,11 +507,6 @@ void GetStellarMassAndLocation(SphGravity * grav, MeshBlock * pmb) {
     // but keep this here just in case
   }
 
-  // save results in ruser_mesh_data
-  pmb->pmy_mesh->ruser_mesh_data[0](0) = M_star;
-  pmb->pmy_mesh->ruser_mesh_data[0](1) = x_star;
-  pmb->pmy_mesh->ruser_mesh_data[0](2) = y_star;
-  pmb->pmy_mesh->ruser_mesh_data[0](3) = z_star;
   // save results in grav
   grav->M_star = M_star;
   grav->x_star = x_star;
