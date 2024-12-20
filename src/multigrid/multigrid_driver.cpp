@@ -710,6 +710,8 @@ void MultigridDriver::SolveFMGCycle() {
 
 void MultigridDriver::SolveIterative() {
   int n = 0;
+  int n_max = 100;
+  if (niter_>=0) n_max=niter_;
   Real def = 0.0;
   for (int v = 0; v < nvar_; ++v)
     def += CalculateDefectNorm(MGNormType::l2, v);
@@ -728,12 +730,13 @@ void MultigridDriver::SolveIterative() {
                   << "Slow multigrid convergence : defect norm = " << def
                   << ", convergence factor = " << def/olddef << "." << std::endl;
     }
-    if (n > 100) {
+    if (n > n_max) {
       if (Globals::my_rank == 0) {
         std::cout
             << "### Warning in MultigridDriver::SolveIterative" << std::endl
-            << "Aborting because the # iterations is too large, n > 100." << std::endl
-            << "Check the solution as it may not be accurate enough." << std::endl;
+            << "Aborting because the # iterations is too large, n > " << n_max << std::endl
+            << "Check the solution as it may not be accurate enough." << std::endl
+            << "Current defect norm = " << def << std::endl;
       }
       break;
     }
