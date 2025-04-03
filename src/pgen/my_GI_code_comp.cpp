@@ -59,6 +59,10 @@ int perturbation_m_min = 1;
 int perturbation_m_max = 6;
 int random_seed = 2024; // fix this across simulations to use the same physical ic
 
+// sink setup for cartesian
+Real r_acc=0.; // accretor size; default is Rd_in
+Real f_sink=0.; // remove mass at f_sink * Omega at r_acc
+
 
 //========================================================================================
 // Forward declarations
@@ -163,6 +167,10 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   perturbation_m_min = pin->GetOrAddInteger("problem","perturbation_m_min",perturbation_m_min);
   perturbation_m_max = pin->GetOrAddInteger("problem","perturbation_m_max",perturbation_m_max);
   random_seed = pin->GetOrAddInteger("problem","random_seed",random_seed);
+
+  // sink
+  r_acc = pin->GetOrAddReal("problem","r_acc",Rd_in);
+  f_sink = pin->GetOrAddReal("problem","f_sink",f_sink);
 
   // physics
   SetFourPiG(4.*PI*G);
@@ -282,6 +290,23 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt,
         Real Ek = .5*(SQR(cons(IM1,k,j,i)) + SQR(cons(IM2,k,j,i)) + SQR(cons(IM3,k,j,i)))/cons(IDN,k,j,i);
         Real E_cap = cons(IDN,k,j,i)*T_cap/gm1 + Ek;
         if (cons(IEN,k,j,i)>E_cap) cons(IEN,k,j,i)=E_cap;
+      }
+    }
+  }
+  // apply sink
+  if (is_cart) {
+    for (int k = pmb->ks; k <= pmb->ke; ++k) {
+      for (int j = pmb->js; j <= pmb->je; ++j) {
+        for (int i = pmb->is; i <= pmb->ie; ++i) {
+          if (SQR(pmb->pcoord->x1v(i))+SQR(pmb->pcoord->x2v(j))+SQR(pmb->pcoord->x3v(k))<SQR(r_acc)){
+            Real f = (1-std::exp(-dt*f_sink*std::sqrt(G*M/(r_acc*r_acc*r_acc))));
+            cons(IDN,k,j,i)*=f;
+            cons(IM1,k,j,i)*=f;
+            cons(IM2,k,j,i)*=f;
+            cons(IM3,k,j,i)*=f;
+            cons(IEN,k,j,i)*=f;
+          }
+        }
       }
     }
   }
