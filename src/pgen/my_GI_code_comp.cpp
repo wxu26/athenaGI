@@ -63,6 +63,17 @@ int random_seed = 2024; // fix this across simulations to use the same physical 
 Real r_acc=0.; // accretor size; default is Rd_in
 Real f_sink=0.; // remove mass at f_sink * Omega at r_acc
 
+// boundary setup for spherical
+// 1 = reflecting; 2 = outflow with inflow suppression; 3 = vacuum
+int inner_bc_mode = 2;
+int outer_bc_mode = 1;
+
+// accretor setup for spherical
+// 0 = no accretion (also fixes star at origin)
+// 1 = Mstar = Mtot-Mdisk; so outflow from outer boundary is also accreted
+// (todo) 2 = accrete material flowing into the inner boundary
+int sph_acc_mode = 1;
+
 
 //========================================================================================
 // Forward declarations
@@ -71,10 +82,22 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt,
               const AthenaArray<Real> &prim, const AthenaArray<Real> &prim_scalar,
               const AthenaArray<Real> &bcc, AthenaArray<Real> &cons,
               AthenaArray<Real> &cons_scalar);
-void DiskInnerX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
+void DiskInnerX1Reflect(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh);
-void DiskOuterX1(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
+void DiskInnerX1PureOutflow(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
+                 Real time, Real dt,
+                 int il, int iu, int jl, int ju, int kl, int ku, int ngh);
+void DiskInnerX1Vacuum(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
+                 Real time, Real dt,
+                 int il, int iu, int jl, int ju, int kl, int ku, int ngh);
+void DiskOuterX1Reflect(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
+                 Real time, Real dt,
+                 int il, int iu, int jl, int ju, int kl, int ku, int ngh);
+void DiskOuterX1PureOutflow(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
+                 Real time, Real dt,
+                 int il, int iu, int jl, int ju, int kl, int ku, int ngh);
+void DiskOuterX1Vacuum(MeshBlock *pmb, Coordinates *pco, AthenaArray<Real> &prim,FaceField &b,
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh);
 Real MeshGen(Real x, RegionSize rs);
@@ -172,6 +195,11 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
   r_acc = pin->GetOrAddReal("problem","r_acc",Rd_in);
   f_sink = pin->GetOrAddReal("problem","f_sink",f_sink);
 
+  // boundary conditions & sink for spherical
+  inner_bc_mode = pin->GetOrAddInteger("problem","inner_bc_mode",inner_bc_mode);
+  outer_bc_mode = pin->GetOrAddInteger("problem","outer_bc_mode",outer_bc_mode);
+  sph_acc_mode = pin->GetOrAddInteger("problem","sph_acc_mode",sph_acc_mode);
+
   // physics
   SetFourPiG(4.*PI*G);
   // confirm that we haven't declared G in input
@@ -187,10 +215,14 @@ void Mesh::InitUserMeshData(ParameterInput *pin) {
 
   // boundary conitions
   if (mesh_bcs[BoundaryFace::inner_x1] == GetBoundaryFlag("user")) {
-    EnrollUserBoundaryFunction(BoundaryFace::inner_x1, DiskInnerX1);
+    if (inner_bc_mode==1) EnrollUserBoundaryFunction(BoundaryFace::inner_x1, DiskInnerX1Reflect);
+    if (inner_bc_mode==2) EnrollUserBoundaryFunction(BoundaryFace::inner_x1, DiskInnerX1PureOutflow);
+    if (inner_bc_mode==3) EnrollUserBoundaryFunction(BoundaryFace::inner_x1, DiskInnerX1Vacuum);
   }
   if (mesh_bcs[BoundaryFace::outer_x1] == GetBoundaryFlag("user")) {
-    EnrollUserBoundaryFunction(BoundaryFace::outer_x1, DiskOuterX1);
+    if (outer_bc_mode==1) EnrollUserBoundaryFunction(BoundaryFace::outer_x1, DiskOuterX1Reflect);
+    if (outer_bc_mode==2) EnrollUserBoundaryFunction(BoundaryFace::outer_x1, DiskOuterX1PureOutflow);
+    if (outer_bc_mode==3) EnrollUserBoundaryFunction(BoundaryFace::outer_x1, DiskOuterX1Vacuum);
   }
 
   // hst outputs
@@ -323,7 +355,7 @@ void MySource(MeshBlock *pmb, const Real time, const Real dt,
 //========================================================================================
 // this applies only to spherical coord, since for cartesian we can just use built-in bcs
 // reflect poloidal velocity, maintain rotation
-void DiskOuterX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
+void DiskOuterX1Reflect(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
   for (int k=kl; k<=ku; ++k) {
@@ -340,7 +372,57 @@ void DiskOuterX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
   }
 }
 // outflow + velocity cap
-void DiskInnerX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
+void DiskOuterX1PureOutflow(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
+                 Real time, Real dt,
+                 int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
+  for (int k=kl; k<=ku; ++k) {
+    for (int j=jl; j<=ju; ++j) {
+      for (int i=1; i<=ngh; ++i) {
+        Real r1=pmb->pcoord->x1v(iu+i), r2=pmb->pcoord->x1v(iu-i+1);
+        prim(IDN,k,j,iu+i) = prim(IDN,k,j,iu-i+1);
+        prim(IVX,k,j,iu+i) = std::max(0.,prim(IVX,k,j,iu-i+1)*SQR(r2)/SQR(r1));
+        prim(IVY,k,j,iu+i) = prim(IVY,k,j,iu-i+1);
+        prim(IVZ,k,j,iu+i) = prim(IVZ,k,j,iu-i+1)*r1/r2;
+        prim(IPR,k,j,iu+i) = prim(IPR,k,j,iu-i+1);
+      }
+    }
+  }
+}
+// vacuum
+void DiskOuterX1Vacuum(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
+                 Real time, Real dt,
+                 int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
+  for (int k=kl; k<=ku; ++k) {
+    for (int j=jl; j<=ju; ++j) {
+      for (int i=1; i<=ngh; ++i) {
+        prim(IDN,k,j,iu+i) = 1.e-40;
+        prim(IVX,k,j,iu+i) = 0.;
+        prim(IVY,k,j,iu+i) = 0.;
+        prim(IVZ,k,j,iu+i) = 0.;
+        prim(IPR,k,j,iu+i) = 1.e-40;
+      }
+    }
+  }
+}
+// reflect poloidal velocity, maintain rotation
+void DiskInnerX1Reflect(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
+                 Real time, Real dt,
+                 int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
+  for (int k=kl; k<=ku; ++k) {
+    for (int j=jl; j<=ju; ++j) {
+      for (int i=1; i<=ngh; ++i) {
+        Real r1=pmb->pcoord->x1v(il-i), r2=pmb->pcoord->x1v(il+i-1);
+        prim(IDN,k,j,il-i) = prim(IDN,k,j,il+i-1);
+        prim(IVX,k,j,il-i) = -prim(IVX,k,j,il+i-1)*SQR(r2)/SQR(r1);
+        prim(IVY,k,j,il-i) = -prim(IVY,k,j,il+i-1);
+        prim(IVZ,k,j,il-i) = prim(IVZ,k,j,il+i-1)*r1/r2;
+        prim(IPR,k,j,il-i) = prim(IPR,k,j,il+i-1);
+      }
+    }
+  }
+}
+// outflow + velocity cap
+void DiskInnerX1PureOutflow(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
                  Real time, Real dt,
                  int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
   for (int k=kl; k<=ku; ++k) {
@@ -352,6 +434,22 @@ void DiskInnerX1(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceF
         prim(IVY,k,j,il-i) = prim(IVY,k,j,il+i-1);
         prim(IVZ,k,j,il-i) = prim(IVZ,k,j,il+i-1)*r1/r2;
         prim(IPR,k,j,il-i) = prim(IPR,k,j,il+i-1);
+      }
+    }
+  }
+}
+// vacuum
+void DiskInnerX1Vacuum(MeshBlock *pmb,Coordinates *pco, AthenaArray<Real> &prim, FaceField &b,
+                 Real time, Real dt,
+                 int il, int iu, int jl, int ju, int kl, int ku, int ngh) {
+  for (int k=kl; k<=ku; ++k) {
+    for (int j=jl; j<=ju; ++j) {
+      for (int i=1; i<=ngh; ++i) {
+        prim(IDN,k,j,il-i) = 1.e-40;
+        prim(IVX,k,j,il-i) = 0.;
+        prim(IVY,k,j,il-i) = 0.;
+        prim(IVZ,k,j,il-i) = 0.;
+        prim(IPR,k,j,il-i) = 1.e-40;
       }
     }
   }
@@ -492,6 +590,13 @@ Real MyHst(MeshBlock *pmb, int iout){
 // Get stellar properties (for spherical only)
 //========================================================================================
 void GetStellarMassAndLocation(SphGravity * grav, MeshBlock * pmb) {
+  if (sph_acc_mode==0) {
+    grav->M_star = M;
+    grav->x_star = 0.;
+    grav->y_star = 0.;
+    grav->z_star = 0.;
+    return;
+  }
   Real M [4] = {0.,0.,0.,0.};
   for (int k = pmb->ks; k <= pmb->ke; ++k) {
     for (int j = pmb->js; j <= pmb->je; ++j) {
