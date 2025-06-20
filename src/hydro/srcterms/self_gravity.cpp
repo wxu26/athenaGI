@@ -60,6 +60,10 @@ void HydroSourceTerms::SelfGravity(const Real dt,const AthenaArray<Real> *flux,
         for (int i=pmb->is; i<=pmb->ie; ++i) {
           Real dx2 = pmb->pcoord->dx2v(j);
           Real hdtodx2 = 0.5*dt/dx2;
+#if SELF_GRAVITY_ENABLED==3 // self-gravity in spherical polar coord
+          Real x1 = pmb->pcoord->x1v(i);
+          hdtodx2 /= x1;
+#endif
           Real dpl = -(pgrav->phi(k,j,  i) - pgrav->phi(k,j-1,i));
           Real dpr = -(pgrav->phi(k,j+1,i) - pgrav->phi(k,j,  i));
           cons(IM2,k,j,i) += hdtodx2 * prim(IDN,k,j,i) * (dpl + dpr);
@@ -79,6 +83,11 @@ void HydroSourceTerms::SelfGravity(const Real dt,const AthenaArray<Real> *flux,
         for (int i=pmb->is; i<=pmb->ie; ++i) {
           Real dx3 = pmb->pcoord->dx3v(k);
           Real hdtodx3 = 0.5*dt/dx3;
+#if SELF_GRAVITY_ENABLED==3 // self-gravity in spherical polar coord
+          Real x1 = pmb->pcoord->x1v(i);
+          Real x2 = pmb->pcoord->x2v(j);
+          hdtodx3 /= x1*sin(x2); // doing sin here is not very efficient, but not a huge problem
+#endif
           Real dpl = -(pgrav->phi(k,  j,i) - pgrav->phi(k-1,j,i));
           Real dpr = -(pgrav->phi(k+1,j,i) - pgrav->phi(k,  j,i));
           cons(IM3,k,j,i) += hdtodx3 * prim(IDN,k,j,i) * (dpl + dpr);
